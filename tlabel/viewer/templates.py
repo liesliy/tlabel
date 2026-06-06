@@ -168,9 +168,21 @@ def generate_panel_html(data_dict: dict, lang: str = "auto", instance_id: str = 
       // 时序4维英文名
       'dim.optical_flow_magnitude': 'OF Mag', 'dim.optical_flow_direction': 'OF Dir',
       'dim.temporal_deformation_rate': 'Deform Rate', 'dim.contact_transition': 'Contact Trans',
-      'field.contact': 'Contact (0/1)', 'field.slip_event': 'Slip Event (0/1)',
-      'field.force_magnitude': 'Force Magnitude', 'field.manipulation_phase': 'Phase',
-    }}
+      'field.contact': 'Contact (0/1)',
+      'field.slip_event': 'Slip Event (0/1)',
+      'field.force_magnitude': 'Force Magnitude',
+      'field.manipulation_phase': 'Phase',
+    }},
+       'ja': {{
+       'app.title': 'TLabel 触覚アノテーター',
+       'stats.frames': 'フレーム数',
+       'stats.duration': '時間'
+      }},
+       'ko': {{
+       'app.title': 'TLabel 촉각 주석 도구',
+       'stats.frames': '프레임 수',
+       'stats.duration': '시간'
+      }}
   }};
 
   let currentLang = '{lang}' === 'auto' ? ((navigator.language||'').startsWith('en') ? 'en' : 'zh-CN') : '{lang}';
@@ -492,8 +504,12 @@ def generate_panel_html(data_dict: dict, lang: str = "auto", instance_id: str = 
   }}
 
   // ===== Lang Toggle =====
-  function toggleLang() {{
-    currentLang = currentLang === 'zh-CN' ? 'en' : 'zh-CN';
+  function toggleLang()
+  {{
+    const langs = ['zh-CN', 'en', 'ja', 'ko'];
+    const idx = langs.indexOf(currentLang);
+    currentLang = langs[(idx + 1) % langs.length];
+
     applyI18n();
     showFrame(currentFrameIdx);
   }}
