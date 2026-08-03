@@ -445,3 +445,99 @@ class TestI18n:
             "Frame detail should use i18n t() function"
         assert "t('detail.slip')" in html or "t(\"detail.slip\")" in html, \
             "Frame detail slip should use i18n"
+
+    def test_i18n_ja_initial_lang(self):
+        """Japanese lang should set currentLang and include Japanese labels"""
+        from tlabel.viewer.templates import generate_panel_html
+        html = generate_panel_html(
+            data_dict={"frames": [], "sensor_info": {"type": "demo"}},
+            lang="ja",
+            instance_id="test_ja",
+            episode_info={},
+            quality_score=None,
+            describe_stats=None,
+        )
+        assert "currentLang = 'ja';" in html, "Japanese initial language not set"
+        assert "触覚" in html, "Japanese labels missing"
+
+    def test_i18n_ko_initial_lang(self):
+        """Korean lang should set currentLang and include Korean labels"""
+        from tlabel.viewer.templates import generate_panel_html
+        html = generate_panel_html(
+            data_dict={"frames": [], "sensor_info": {"type": "demo"}},
+            lang="ko",
+            instance_id="test_ko",
+            episode_info={},
+            quality_score=None,
+            describe_stats=None,
+        )
+        assert "currentLang = 'ko';" in html, "Korean initial language not set"
+        assert "촉각" in html, "Korean labels missing"
+
+    def test_i18n_four_dicts_have_same_keys(self):
+        """All four I18N language dicts must expose the same keys"""
+        import re
+        from tlabel.viewer.templates import generate_panel_html
+        html = generate_panel_html(
+            data_dict={"frames": [], "sensor_info": {"type": "demo"}},
+            lang="en",
+            instance_id="test_keys",
+            episode_info={},
+            quality_score=None,
+            describe_stats=None,
+        )
+        body = html.split("const I18N = {", 1)[1].split("\n  };", 1)[0]
+        keys_by_lang = {}
+        for lang in ("zh-CN", "en", "ja", "ko"):
+            block = body.split(f"'{lang}': {{", 1)[1].split("\n    },", 1)[0]
+            keys_by_lang[lang] = set(
+                re.findall(r"'([A-Za-z][A-Za-z0-9._-]*)':", block)
+            )
+        zh_keys = keys_by_lang["zh-CN"]
+        assert len(zh_keys) > 50, f"Expected 50+ i18n keys, got {len(zh_keys)}"
+        for lang in ("en", "ja", "ko"):
+            assert zh_keys == keys_by_lang[lang], (
+                f"Key mismatch for {lang}: "
+                f"missing={zh_keys - keys_by_lang[lang]}, "
+                f"extra={keys_by_lang[lang] - zh_keys}"
+            )
+
+    def test_i18n_resolve_lang(self):
+        """auto picks sensor_info.lang; aliases and unknown langs fall back safely"""
+        from tlabel.viewer.templates import _resolve_panel_lang
+        assert _resolve_panel_lang("auto", {"lang": "ja"}) == "ja"
+        assert _resolve_panel_lang("auto", {"lang": "ko"}) == "ko"
+        assert _resolve_panel_lang("auto", None) == "zh-CN"
+        assert _resolve_panel_lang("zh", {}) == "zh-CN"
+        assert _resolve_panel_lang("fr", {}) == "zh-CN"
+
+    def test_review_lang_ja_ko(self):
+        """data.review(lang='ja'/'ko') should render Japanese/Korean panels"""
+        import tlabel
+        data = tlabel.demo("gelsight")
+        for lang, marker in (("ja", "触覚"), ("ko", "촉각")):
+            html = data.review(lang=lang)._repr_html_()
+            assert f"currentLang = '{lang}';" in html, \
+                f"{lang} initial language not set"
+            assert marker in html, f"{lang} labels missing"
+
+    def test_batch_panel_i18n_all_langs(self):
+        """Batch panel should expose identical keys across all four languages"""
+        from tlabel.viewer.batch_panel import TLabelBatchPanel, _BATCH_I18N
+        zh_keys = set(_BATCH_I18N["zh-CN"].keys())
+        for lang in ("en", "ja", "ko"):
+            assert zh_keys == set(_BATCH_I18N[lang].keys()), \
+                f"Key mismatch for {lang}"
+
+        class _StubBP:
+            def summary(self):
+                return {
+                    "total_episodes": 0,
+                    "total_frames": 0,
+                    "avg_quality": 0.0,
+                    "grade_dist": {},
+                    "episodes": [],
+                }
+
+        html = TLabelBatchPanel(_StubBP(), lang="ja")._repr_html_()
+        assert "バッチ" in html, "Japanese batch panel labels missing"

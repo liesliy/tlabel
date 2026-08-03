@@ -54,6 +54,38 @@ _BATCH_I18N = {
         "colModified": "Modified",
         "noData": "No episode data",
     },
+    "ja": {
+        "title": "TLabel バッチダッシュボード",
+        "episodes": "エピソード数",
+        "totalFrames": "総フレーム数",
+        "avgQuality": "平均品質",
+        "gradeDist": "グレード分布",
+        "episodeList": "📁 エピソードリスト",
+        "colFile": "ファイル",
+        "colFrames": "フレーム数",
+        "colDuration": "時間(s)",
+        "colSensor": "センサー",
+        "colQuality": "品質",
+        "colGrade": "グレード",
+        "colModified": "修正済み",
+        "noData": "エピソードデータはありません",
+    },
+    "ko": {
+        "title": "TLabel 일괄 처리 대시보드",
+        "episodes": "에피소드 수",
+        "totalFrames": "총 프레임 수",
+        "avgQuality": "평균 품질",
+        "gradeDist": "등급 분포",
+        "episodeList": "📁 에피소드 목록",
+        "colFile": "파일",
+        "colFrames": "프레임 수",
+        "colDuration": "시간(s)",
+        "colSensor": "센서",
+        "colQuality": "품질",
+        "colGrade": "등급",
+        "colModified": "수정됨",
+        "noData": "에피소드 데이터 없음",
+    },
 }
 
 
@@ -67,8 +99,8 @@ class TLabelBatchPanel:
 
     def _t(self, key: str) -> str:
         """Get i18n text."""
-        lang = self.lang if self.lang in ("zh-CN", "en") else "en"
-        return _BATCH_I18N.get(lang, _BATCH_I18N["en"]).get(key, key)
+        lang = self.lang if self.lang in _BATCH_I18N else "en"
+        return _BATCH_I18N[lang].get(key, key)
 
     def _repr_html_(self):
         """Jupyter自动调用渲染"""

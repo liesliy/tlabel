@@ -16,6 +16,18 @@ from tlabel._version import __version__
 from typing import Optional, Dict
 
 
+_PANEL_LANGS = ("zh-CN", "en", "ja", "ko")
+
+
+def _resolve_panel_lang(lang: str, sensor_info: Optional[Dict]) -> str:
+    """Normalize the panel language; auto prefers sensor_info.lang."""
+    if lang == "auto":
+        lang = (sensor_info or {}).get("lang") or "zh-CN"
+    if lang in ("zh", "zh-cn"):
+        return "zh-CN"
+    return lang if lang in _PANEL_LANGS else "zh-CN"
+
+
 def generate_panel_html(
     data_dict: dict,
     lang: str = "auto",
@@ -38,6 +50,7 @@ def generate_panel_html(
     # v0.12: 触觉图像数据
     images_json = json.dumps(tactile_images or [], ensure_ascii=False, default=str)
     tid = instance_id
+    initial_lang = _resolve_panel_lang(lang, data_dict.get("sensor_info"))
 
     return f"""<div id="{tid}-root" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
      max-width: 960px; margin: 0 auto; background: #f8f9fa; color: #343a40;
@@ -544,7 +557,7 @@ def generate_panel_html(
   const tactileImages = {images_json};  // v0.12: 触觉图像列表
   const tid = '{tid}';
   let currentFrameIdx = 0;
-  let currentLang = (data.sensor_info && data.sensor_info.lang) || 'zh-CN';
+  let currentLang = '{initial_lang}';
   let modifiedCount = 0;
   const undoStack = [];
 
@@ -621,6 +634,13 @@ def generate_panel_html(
       'dim.texture_class': '纹理', 'dim.object_deformation': '形变',
       'dim.temperature': '温度', 'dim.confidence': '置信',
       'dim.compliance_level': '合规',
+      // UI messages
+      'export.hdf5Msg': 'HDF5 导出需要使用 Python API:\\n\\ndata.export("output.hdf5")',
+      'export.selectArea': '⚠️ 请至少选择一个功能区',
+      'export.preparing': '⏳ 正在准备导出...',
+      'export.previewReady': '✅ 导出预览已生成',
+      'episode.savedMsg': 'Episode标注已保存（将随导出数据一起输出）',
+      'shortcuts.help': '快捷键:\\n← → 切帧\\n空格 标记/取消接触\\nS 标记/取消滑移\\nD 切换暗色模式\\n? 显示帮助',
     }},
     'en': {{
       'app.title': 'TLabel Tactile Annotation',
@@ -693,13 +713,187 @@ def generate_panel_html(
       'dim.texture_class': 'Texture', 'dim.object_deformation': 'Deform',
       'dim.temperature': 'Temp', 'dim.confidence': 'Conf',
       'dim.compliance_level': 'Compliance',
+      // UI messages
+      'export.hdf5Msg': 'HDF5 export requires Python API:\\n\\ndata.export("output.hdf5")',
+      'export.selectArea': '⚠️ Select at least one functional area',
+      'export.preparing': '⏳ Preparing export...',
+      'export.previewReady': '✅ Export preview ready',
+      'episode.savedMsg': 'Episode labels saved (will be exported with data)',
+      'shortcuts.help': 'Shortcuts:\\n← → Navigate\\nSpace Toggle contact\\nS Toggle slip\\nD Dark mode\\n? Help',
+    }},
+    'ja': {{
+      'app.title': 'TLabel 触覚アノテーションツール',
+      'stats.frames': 'フレーム数', 'stats.duration': '時間', 'stats.contact': '接触率',
+      'stats.slip': '滑り率', 'stats.modified': '修正済み',
+      'timeline.title': 'タイムライン',
+      'chart.radar': '14次元スキーマ',
+      'detail.title': 'フレーム詳細',
+      'batch.title': '範囲バッチ修正',
+      'batch.frameRange': 'フレーム範囲：',
+      'batch.apply': '適用',
+      'export.title': 'データ出力', 'export.hint': '形式を選択し、対応するボタンをクリック',
+      'actions.exportFull': '💾 JSON出力', 'actions.exportCSV': '📊 CSV出力', 'actions.exportHDF5': '🔬 HDF5出力',
+      'export.success': '出力成功',
+      'tab.annotate': '📝 注釈', 'tab.episode': '🎬 エピソード', 'tab.quality': '📊 品質スコア', 'tab.stats': '📈 統計', 'tab.export': '🚀 出力',
+      'export.ftp1_title': 'FTP-1 / MTTS形式の出力', 'export.ftp1_desc': '触覚基盤モデルFTP-1互換のMTTS Zarr形式で出力',
+      'export.sensor_name': 'センサー名', 'export.side': '取付位置', 'export.group': 'グループ名',
+      'export.area_title': '🎯 機能エリアマッピング', 'export.area_desc': 'このセンサーに対応するMTTS機能エリアのスロットを選択',
+      'export.btn_export': '📦 FTP-1 Zarrとして出力', 'export.result_title': '📋 出力結果',
+      'export.format_ref': '📖 MTTS Zarr形式リファレンス', 'export.format_note': '💡 出力した.zarrファイルはFTP-1で直接読み込めます',
+      'export.preset_gripper': 'プリセット: グリッパー [0,1]', 'export.preset_three': 'プリセット: 3本指 [0,1,2]', 'export.preset_five': 'プリセット: 5本指 [0-4]',
+      'episode.title': 'エピソード注釈', 'episode.desc': '操作タスク全体の結果と属性に意味的なラベルを追加します。結果はepisode_infoに保存され、データと一緒に出力されます。',
+      'episode.outcome': '操作結果', 'episode.outcomeDefault': '— 未注釈 —',
+      'episode.manipType': '操作タイプ', 'episode.manipTypeDefault': '— 未注釈 —',
+      'episode.difficulty': '難易度', 'episode.difficultyDefault': '— 未注釈 —',
+      'episode.operator': '注釈者', 'episode.notes': '備考',
+      'episode.apply': '✅ エピソード注釈を保存',
+      'episode.currentInfo': '現在のエピソード情報',
+      'quality.title': 'データ品質スコア',
+      'quality.desc': '4つの次元でデータ品質を自動評価します（国家標準に準拠）。スコアはPythonエンジンで事前計算されます。',
+      'quality.overallLabel': '総合スコア (0-100)',
+      'quality.physical': '物理的整合性', 'quality.physicalDesc': '重み30% · 連動ルール充足度',
+      'quality.temporal': '時間的平滑性', 'quality.temporalDesc': '重み25% · 隣接フレームの急変検出',
+      'quality.completeness': '完全性', 'quality.completenessDesc': '重み25% · フィールド欠落・全ゼロ比率',
+      'quality.coverage': 'カバレッジ', 'quality.coverageDesc': '重み20% · 有意な注釈の割合',
+      'quality.warnings': '品質警告',
+      'stats.title': '統計サマリー (describe)', 'stats.desc': 'pandasのDataFrame.describe()と同様の統計をPythonエンジンで事前計算。',
+      'stats.noData': '統計データはありません',
+      'batch.optContact': '接触 (0/1)', 'batch.optSlip': '滑りイベント (0/1)',
+      'batch.optForce': '力', 'batch.optDeformation': '変形', 'batch.optPhase': '操作フェーズ',
+      'episode.outSuccess': '✅ 成功', 'episode.outFailure': '❌ 失敗',
+      'episode.outAborted': '⏹️ 中止', 'episode.outPartial': '⚠️ 部分成功',
+      'episode.mGrasp': '🤏 掴む', 'episode.mPush': '👆 押す',
+      'episode.mPull': '👇 引く', 'episode.mTap': '👆 軽く触れる',
+      'episode.mLift': '⬆️ 持ち上げる', 'episode.mPlace': '⬇️ 置く',
+      'episode.mRotate': '🔄 回転', 'episode.mInsert': '🔩 挿入',
+      'episode.dEasy': '🟢 簡単', 'episode.dMedium': '🟡 普通',
+      'episode.dHard': '🔴 難しい',
+      'episode.operatorPh': '任意', 'episode.notesPh': '操作の詳細や失敗原因などを記録...',
+      'detail.contact': '接触', 'detail.slip': '滑り', 'detail.force': '力',
+      'detail.deformation': '変形', 'detail.area': '面積', 'detail.entropy': 'エントロピー',
+      'detail.normal': '法線', 'detail.shear': 'せん断',
+      'quality.noWarnings': '品質警告なし',
+      'episode.saved': '保存済み', 'episode.noLabels': 'エピソード注釈はまだありません',
+      'predict.badge.title': 'AI予測結果',
+      'predict.lowConf': '低信頼度',
+      'predict.method': '手法',
+      'predict.smooth': '時系列平滑化',
+      'predict.hmm': 'HMMデコード',
+      'predict.cascade': '連動修正',
+      // Stats i18n keys for describe table
+      'stats.count': 'カウント', 'stats.mean': '平均', 'stats.std': '標準偏差',
+      'stats.min': '最小', 'stats.max': '最大',
+      'stats.p25': '25%分位', 'stats.p50': '中央値', 'stats.p75': '75%分位',
+      // Radar chart i18n labels (dimension names — Schema V2 14次元)
+      'dim.contact': '接触', 'dim.contact_centroid': '重心', 'dim.contact_region': '領域',
+      'dim.force_magnitude': '力', 'dim.force_vector': '力ベクトル',
+      'dim.torque_vector': 'トルク', 'dim.slip_event': '滑り',
+      'dim.slip_velocity': '滑り速度', 'dim.manipulation_phase': 'フェーズ',
+      'dim.texture_class': 'テクスチャ', 'dim.object_deformation': '変形',
+      'dim.temperature': '温度', 'dim.confidence': '信頼度',
+      'dim.compliance_level': 'コンプライアンス',
+      // UI messages
+      'export.hdf5Msg': 'HDF5出力にはPython APIを使用してください:\\n\\ndata.export("output.hdf5")',
+      'export.selectArea': '⚠️ 機能エリアを1つ以上選択してください',
+      'export.preparing': '⏳ 出力を準備中...',
+      'export.previewReady': '✅ 出力プレビューを生成しました',
+      'episode.savedMsg': 'エピソード注釈を保存しました（データと一緒に出力されます）',
+      'shortcuts.help': 'ショートカット:\\n← → フレーム移動\\nスペース 接触を切替\\nS 滑りを切替\\nD ダークモード切替\\n? ヘルプ',
+    }},
+    'ko': {{
+      'app.title': 'TLabel 촉각 어노테이션 도구',
+      'stats.frames': '프레임 수', 'stats.duration': '시간', 'stats.contact': '접촉률',
+      'stats.slip': '미끄럼률', 'stats.modified': '수정됨',
+      'timeline.title': '타임라인',
+      'chart.radar': '14차원 스키마',
+      'detail.title': '프레임 상세',
+      'batch.title': '범위 일괄 수정',
+      'batch.frameRange': '프레임 범위:',
+      'batch.apply': '적용',
+      'export.title': '데이터 내보내기', 'export.hint': '형식을 선택하고 해당 버튼을 클릭하세요',
+      'actions.exportFull': '💾 JSON 내보내기', 'actions.exportCSV': '📊 CSV 내보내기', 'actions.exportHDF5': '🔬 HDF5 내보내기',
+      'export.success': '내보내기 성공',
+      'tab.annotate': '📝 주석', 'tab.episode': '🎬 에피소드', 'tab.quality': '📊 품질 점수', 'tab.stats': '📈 통계', 'tab.export': '🚀 내보내기',
+      'export.ftp1_title': 'FTP-1 / MTTS 형식 내보내기', 'export.ftp1_desc': '촉각 기반 모델 FTP-1 호환 MTTS Zarr 형식으로 내보내기',
+      'export.sensor_name': '센서 이름', 'export.side': '장착 위치', 'export.group': '그룹 이름',
+      'export.area_title': '🎯 기능 영역 매핑', 'export.area_desc': '이 센서에 해당하는 MTTS 기능 영역 슬롯 선택',
+      'export.btn_export': '📦 FTP-1 Zarr로 내보내기', 'export.result_title': '📋 내보내기 결과',
+      'export.format_ref': '📖 MTTS Zarr 형식 참조', 'export.format_note': '💡 내보낸 .zarr 파일은 FTP-1에서 직접 로드할 수 있습니다',
+      'export.preset_gripper': '프리셋: 그리퍼 [0,1]', 'export.preset_three': '프리셋: 3손가락 [0,1,2]', 'export.preset_five': '프리셋: 5손가락 [0-4]',
+      'episode.title': '에피소드 주석', 'episode.desc': '상호작용 에피소드 전체에 의미적 라벨을 추가합니다. 결과는 episode_info에 저장되어 데이터와 함께 내보내집니다.',
+      'episode.outcome': '작업 결과', 'episode.outcomeDefault': '— 미라벨링 —',
+      'episode.manipType': '조작 유형', 'episode.manipTypeDefault': '— 미라벨링 —',
+      'episode.difficulty': '난이도', 'episode.difficultyDefault': '— 미라벨링 —',
+      'episode.operator': '라벨러', 'episode.notes': '메모',
+      'episode.apply': '✅ 에피소드 라벨 저장',
+      'episode.currentInfo': '현재 에피소드 정보',
+      'quality.title': '데이터 품질 점수',
+      'quality.desc': '4개 차원에서 데이터 품질을 자동 평가합니다 (국가 표준 기반). 점수는 Python 엔진에서 미리 계산됩니다.',
+      'quality.overallLabel': '종합 점수 (0-100)',
+      'quality.physical': '물리적 일관성', 'quality.physicalDesc': '가중치 30% · 연동 규칙 충족도',
+      'quality.temporal': '시간적 평활도', 'quality.temporalDesc': '가중치 25% · 인접 프레임 급변 감지',
+      'quality.completeness': '완전성', 'quality.completenessDesc': '가중치 25% · 필드 누락/전체 0 비율',
+      'quality.coverage': '커버리지', 'quality.coverageDesc': '가중치 20% · 유의미한 라벨 비율',
+      'quality.warnings': '품질 경고',
+      'stats.title': '통계 요약 (describe)', 'stats.desc': 'pandas DataFrame.describe()와 유사한 통계로, Python 엔진에서 미리 계산됩니다.',
+      'stats.noData': '통계 데이터 없음',
+      'batch.optContact': '접촉 (0/1)', 'batch.optSlip': '미끄럼 이벤트 (0/1)',
+      'batch.optForce': '힘', 'batch.optDeformation': '변형', 'batch.optPhase': '조작 단계',
+      'episode.outSuccess': '✅ 성공', 'episode.outFailure': '❌ 실패',
+      'episode.outAborted': '⏹️ 중단', 'episode.outPartial': '⚠️ 부분 성공',
+      'episode.mGrasp': '🤏 잡기', 'episode.mPush': '👆 밀기',
+      'episode.mPull': '👇 당기기', 'episode.mTap': '👆 가볍게 두드리기',
+      'episode.mLift': '⬆️ 들어올리기', 'episode.mPlace': '⬇️ 놓기',
+      'episode.mRotate': '🔄 회전', 'episode.mInsert': '🔩 삽입',
+      'episode.dEasy': '🟢 쉬움', 'episode.dMedium': '🟡 보통',
+      'episode.dHard': '🔴 어려움',
+      'episode.operatorPh': '선택사항', 'episode.notesPh': '작업 세부사항, 실패 원인 등을 기록...',
+      'detail.contact': '접촉', 'detail.slip': '미끄럼', 'detail.force': '힘',
+      'detail.deformation': '변형', 'detail.area': '면적', 'detail.entropy': '엔트로피',
+      'detail.normal': '법선', 'detail.shear': '전단',
+      'quality.noWarnings': '품질 경고 없음',
+      'episode.saved': '저장됨', 'episode.noLabels': '에피소드 라벨이 아직 없습니다',
+      'predict.badge.title': 'AI 예측 결과',
+      'predict.lowConf': '낮은 신뢰도',
+      'predict.method': '방법',
+      'predict.smooth': '시계열 평활화',
+      'predict.hmm': 'HMM 디코딩',
+      'predict.cascade': '연동 수정',
+      // Stats i18n keys for describe table
+      'stats.count': '개수', 'stats.mean': '평균', 'stats.std': '표준편차',
+      'stats.min': '최소', 'stats.max': '최대',
+      'stats.p25': '25% 분위', 'stats.p50': '중앙값', 'stats.p75': '75% 분위',
+      // Radar chart i18n labels (dimension names — Schema V2 14차원)
+      'dim.contact': '접촉', 'dim.contact_centroid': '중심', 'dim.contact_region': '영역',
+      'dim.force_magnitude': '힘', 'dim.force_vector': '힘 벡터',
+      'dim.torque_vector': '토크', 'dim.slip_event': '미끄럼',
+      'dim.slip_velocity': '미끄럼 속도', 'dim.manipulation_phase': '단계',
+      'dim.texture_class': '질감', 'dim.object_deformation': '변형',
+      'dim.temperature': '온도', 'dim.confidence': '신뢰도',
+      'dim.compliance_level': '컴플라이언스',
+      // UI messages
+      'export.hdf5Msg': 'HDF5 내보내기는 Python API를 사용해야 합니다:\\n\\ndata.export("output.hdf5")',
+      'export.selectArea': '⚠️ 기능 영역을 하나 이상 선택하세요',
+      'export.preparing': '⏳ 내보내기 준비 중...',
+      'export.previewReady': '✅ 내보내기 미리보기가 생성되었습니다',
+      'episode.savedMsg': '에피소드 라벨이 저장되었습니다 (데이터와 함께 내보내집니다)',
+      'shortcuts.help': '단축키:\\n← → 프레임 이동\\n스페이스 접촉 전환\\nS 미끄럼 전환\\nD 다크 모드 전환\\n? 도움말',
     }}
   }};
 
   function t(key) {{ return (I18N[currentLang] || I18N['zh-CN'])[key] || key; }}
 
+  const LANG_ORDER = ['zh-CN', 'en', 'ja', 'ko'];
+
+  function langBtnLabel(lang) {{
+    if (lang === 'zh-CN') return '中文';
+    if (lang === 'en') return 'EN';
+    if (lang === 'ja') return '日本語';
+    return '한국어';
+  }}
+
   function applyI18n() {{
-    const lang = currentLang === 'zh-CN' ? 'zh-CN' : 'en';
+    const lang = I18N[currentLang] ? currentLang : 'zh-CN';
     document.querySelectorAll('[data-i18n]').forEach(el => {{
       const key = el.getAttribute('data-i18n');
       if (I18N[lang] && I18N[lang][key]) el.textContent = I18N[lang][key];
@@ -709,6 +903,8 @@ def generate_panel_html(
       const key = el.getAttribute('data-i18n-placeholder');
       if (I18N[lang] && I18N[lang][key]) el.placeholder = I18N[lang][key];
     }});
+    const nextIdx = (LANG_ORDER.indexOf(currentLang) + 1) % LANG_ORDER.length;
+    document.getElementById(tid + '-lang-btn').textContent = langBtnLabel(LANG_ORDER[nextIdx]);
   }}
 
   // ===== Tab Switching =====
@@ -1332,10 +1528,7 @@ def generate_panel_html(
   }}
 
   function exportHDF5() {{
-    const msg = currentLang === 'zh-CN' 
-      ? 'HDF5 导出需要使用 Python API:\\n\\ndata.export("output.hdf5")'
-      : 'HDF5 export requires Python API:\\n\\ndata.export("output.hdf5")';
-    alert(msg);
+    alert(t('export.hdf5Msg'));
   }}
 
   function showExportStatus(msg) {{
@@ -1400,11 +1593,11 @@ def generate_panel_html(
     const resultContent = document.getElementById(tid + '-ftp1-result-content');
 
     if (selectedAreas.length === 0) {{
-      status.textContent = currentLang === 'zh-CN' ? '⚠️ 请至少选择一个功能区' : '⚠️ Select at least one functional area';
+      status.textContent = t('export.selectArea');
       return;
     }}
 
-    status.textContent = currentLang === 'zh-CN' ? '⏳ 正在准备导出...' : '⏳ Preparing export...';
+    status.textContent = t('export.preparing');
 
     // Generate export summary (actual Zarr writing requires Python backend)
     const nFrames = (data.frames || []).length;
@@ -1427,14 +1620,15 @@ def generate_panel_html(
       python_command: 'data.export_ftp1("output.zarr",\\n  sensor_name="' + sensor + '",\\n  functional_areas=' + JSON.stringify(selectedAreas) + ',\\n  side="' + side + '",\\n  group="' + group + '")'
     }};
 
-    status.textContent = currentLang === 'zh-CN' ? '✅ 导出预览已生成' : '✅ Export preview ready';
+    status.textContent = t('export.previewReady');
     resultDiv.style.display = 'block';
     resultContent.textContent = JSON.stringify(summary, null, 2);
   }}
 
   // ===== Lang Toggle =====
   function toggleLang() {{
-    currentLang = currentLang === 'zh-CN' ? 'en' : 'zh-CN';
+    const idx = LANG_ORDER.indexOf(currentLang);
+    currentLang = LANG_ORDER[(idx + 1) % LANG_ORDER.length];
     applyI18n();
     showFrame(currentFrameIdx);
     // Re-render quality and episode info
@@ -1480,9 +1674,7 @@ def generate_panel_html(
 
     // Show status with detailed message
     const statusEl = document.getElementById(tid + '-episode-status');
-    const savedMsg = currentLang === 'zh-CN' 
-      ? 'Episode标注已保存（将随导出数据一起输出）'
-      : 'Episode labels saved (will be exported with data)';
+    const savedMsg = t('episode.savedMsg');
     statusEl.textContent = '✅ ' + savedMsg;
     statusEl.style.color = '#51cf66';
     statusEl.style.display = 'inline';
@@ -1744,9 +1936,7 @@ def generate_panel_html(
         break;
       case 'd': case 'D': toggleDark(); break;
       case '?':
-        alert(currentLang === 'zh-CN'
-          ? '快捷键:\\n← → 切帧\\n空格 标记/取消接触\\nS 标记/取消滑移\\nD 切换暗色模式\\n? 显示帮助'
-          : 'Shortcuts:\\n← → Navigate\\nSpace Toggle contact\\nS Toggle slip\\nD Dark mode\\n? Help');
+        alert(t('shortcuts.help'));
         break;
     }}
   }});
