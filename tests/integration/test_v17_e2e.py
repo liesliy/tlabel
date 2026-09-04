@@ -25,7 +25,9 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 # 确保 tlabel 在 sys.path 上
-REPO_ROOT = "/app/data/所有对话/主对话/牛宿科技/tlabel-repo"
+# v0.23: derive the repo root from this file's location
+# (tests/integration/<file>.py -> repo root is two levels up)
+REPO_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 

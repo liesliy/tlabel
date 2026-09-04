@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tlabel"
-version = "0.22.4"
+version = "0.23.0"
 description = "TouchLabel AI - Tactile Data Annotation Toolkit"
 readme = "README.md"
 requires-python = ">=3.8"

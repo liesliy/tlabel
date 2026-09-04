@@ -4,6 +4,17 @@ All notable changes to the TLabel project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.23.0] - 2026-09-04
+
+### Added
+- **XELA uSkin sensor adapter** (`xela`): DataAdapter for XELA Robotics uSkin uSPa 46 tactile sensors (4×6 = 24 taxels × 3-axis Hall-effect sensing) and the UniTac-NV public dataset in CSV format (IROS 2025). Follows the DataAdapterBase standard pattern with dual parsing (header aliases + positional columns) and per-frame layout validation. Honest physical-unit policy: force fields default to `null` when the upstream dataset does not document force units, and the record upgrades to compliance level L3 once `force_scale` is provided. Contributed by gaolebaigao (PR #24).
+- **UniVTAC adapter**: support for the new recording format's tactile keys `left_tactile` / `right_tactile` (legacy `*_gsmini` keys remain fully supported).
+
+### Fixed
+- **UniVTAC adapter `episode_info.sensor_ids` was always empty**: membership checks like `f'tactile/{key}' in f` were evaluated against the h5py root group (whose direct members are only top-level groups) *after* the HDF5 file had been closed, so every sensor key resolved as absent. The adapter now probes the `tactile` subgroup while the file is open and records the actually present sensor ids.
+- **UniVTAC adapter `marker_count` was hardcoded** (1200 for legacy gsmini, 63 fallback for new keys): the sensor layout `marker_count` is now inferred dynamically from the marker dataset shape `(T, 2, marker_size, 2)` (using `shape[2]`), falling back to the `SENSOR_CONFIG` value only when the dataset is unavailable or has an unexpected shape.
+- **Tests: hardcoded local absolute paths** in `tests/test_v18_real_hdf5.py`, `tests/integration/test_v17_e2e.py` and `tests/unit/test_tacquad.py` polluted `sys.path` (causing the suite to import a stale developer copy of `tlabel`) and crashed pytest collection. Paths are now derived from `__file__`, and the real-HDF5 integration test skips gracefully when the source data files are not present.
+
 ## [0.22.4] - 2026-09-03
 ### Added
 - LeRobot dataset exporter: create new LeRobot v2.1 datasets from TLabel annotations

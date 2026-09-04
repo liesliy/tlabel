@@ -99,9 +99,9 @@ pip install tlabel[all]        # 全部安装
 
 ## 支持的传感器
 
-**数据集适配器**（离线加载）：GelSight/DIGIT (L3) · Daimon DM-TacClaw (L3) · PaXini PXCap (L2) · UniVTAC (L3) · TacQuad/AnyTouch (L3) · VTouch (L3) · YCB-Slide (L3) · XELA uSkin/UniTac-NV (L1)
+**数据集适配器**（离线加载）：GelSight/DIGIT (L3) · Daimon DM-TacClaw (L3) · PaXini PXCap (L2) · UniVTAC (L3，兼容旧版 `*_gsmini` 与新版 `*_tactile` 两种 HDF5 触觉键) · TacQuad/AnyTouch (L1) · VTouch (L2) · ToucHD-Force/AnyTouch 2 (L3) · YCB-Slide (L2) · SynTouch BioTac (L2) · 他山科技 Tashan TS-F-A (L3) · XELA uSkin/UniTac-NV (L1)
 
-**实时适配器**（硬件直连）：PaXini GEN3 (L2) · Daimon DM-Tac (L3)
+**实时适配器**（硬件直连）：PaXini GEN3 (L2) · Daimon DM-Tac (L2)
 
 📖 添加新传感器仅需 ~30 分钟 — Fork [contrib/adapter-template/](contrib/adapter-template/)
 

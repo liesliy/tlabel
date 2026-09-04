@@ -124,8 +124,6 @@ def create_demo_dataset(root_dir, num_items=2, frames_per_item=5,
 
 def run_test(demo_root):
     """Run adapter test on demo dataset"""
-    import sys
-    sys.path.insert(0, '/tmp/tlabel-dev/src')
 
     # Need to set up minimal tlabel package structure
     # The test imports from tlabel.adapters.tacquad directly

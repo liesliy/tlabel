@@ -96,9 +96,9 @@ Full dimension spec → [docs/tlabel-format.md](docs/tlabel-format.md)
 
 ## Supported Sensors
 
-**Dataset Adapters** (offline): GelSight/DIGIT (L3) · Daimon DM-TacClaw (L3) · PaXini PXCap (L2) · UniVTAC (L3) · TacQuad/AnyTouch (L3) · VTouch (L3) · YCB-Slide (L3) · XELA uSkin/UniTac-NV (L1)
+**Dataset Adapters** (offline): GelSight/DIGIT (L3) · Daimon DM-TacClaw (L3) · PaXini PXCap (L2) · UniVTAC (L3, legacy `*_gsmini` and new `*_tactile` HDF5 layouts) · TacQuad/AnyTouch (L1) · VTouch (L2) · ToucHD-Force/AnyTouch 2 (L3) · YCB-Slide (L2) · SynTouch BioTac (L2) · Tashan TS-F-A (L3) · XELA uSkin/UniTac-NV (L1)
 
-**Real-time Adapters** (hardware): PaXini GEN3 (L2) · Daimon DM-Tac (L3)
+**Real-time Adapters** (hardware): PaXini GEN3 (L2) · Daimon DM-Tac (L2)
 
 Adding a new sensor takes ~30 min — fork [contrib/adapter-template/](contrib/adapter-template/)
 

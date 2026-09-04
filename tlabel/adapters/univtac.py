@@ -49,6 +49,23 @@ SENSOR_CONFIG = {
         'resolution': [240, 320],
         'frame_rate': 30.0,
         'marker_count': 1200,
+    },
+    # v0.23: new-format UniVTAC recordings use left_tactile/right_tactile keys
+    'left_tactile': {
+        'name': 'GelSight Mini Left',
+        'type': 'vision_based',
+        'description': 'GelSight Mini left finger tactile sensor (new-format key), resolution 240x320, 30Hz',
+        'resolution': [240, 320],
+        'frame_rate': 30.0,
+        'marker_count': 63,
+    },
+    'right_tactile': {
+        'name': 'GelSight Mini Right',
+        'type': 'vision_based',
+        'description': 'GelSight Mini right finger tactile sensor (new-format key), resolution 240x320, 30Hz',
+        'resolution': [240, 320],
+        'frame_rate': 30.0,
+        'marker_count': 63,
     }
 }
 
@@ -236,13 +253,25 @@ class UniVTACAdapter(BaseAdapter):
         with h5py.File(h5_path, 'r') as f:
             T = self._get_num_frames(f)
 
+            # v0.23: enumerate sensors via the tactile subgroup directly.
+            # (Membership checks against the root group with a full path like
+            # 'tactile/<key>' are unreliable across h5py/HDF5 versions and the
+            # check must run while the file is still open.)
+            tactile_group = f['tactile'] if 'tactile' in f else None
+            sensor_ids = [k for k in SENSOR_CONFIG
+                          if tactile_group is not None and k in tactile_group]
+
             # 验证传感器存在
-            if f'tactile/{sensor_id}' not in f:
-                available = [k for k in SENSOR_CONFIG
-                             if f'tactile/{k}' in f]
+            if tactile_group is None or sensor_id not in tactile_group:
                 raise ValueError(
-                    f"传感器 '{sensor_id}' 不存在，可用: {available}"
+                    f"传感器 '{sensor_id}' 不存在，可用: {sensor_ids}"
                 )
+
+            # v0.23: infer marker_count from the actual marker dataset
+            # shape (T, 2, marker_size, 2); fall back to SENSOR_CONFIG.
+            marker_count = self._detect_marker_count(f, sensor_id)
+            if marker_count is None:
+                marker_count = SENSOR_CONFIG[sensor_id]['marker_count']
 
             for t in range(T):
                 frame = self._convert_frame(
@@ -255,7 +284,7 @@ class UniVTACAdapter(BaseAdapter):
         # 构建 TLabelData
         sensor_cfg = SENSOR_CONFIG[sensor_id]
         contact_count = sum(
-            1 for f in frames if f.contact > 0.5
+            1 for fr in frames if fr.contact > 0.5
         )
 
         sensor_info = {
@@ -267,7 +296,7 @@ class UniVTACAdapter(BaseAdapter):
                 "type": "single_sensor",
                 "sensor_id": sensor_id,
                 "resolution": f"{sensor_cfg['resolution'][0]}x{sensor_cfg['resolution'][1]}",
-                "marker_count": sensor_cfg['marker_count'],
+                "marker_count": int(marker_count),
                 "sampling_rate_hz": sensor_cfg['frame_rate'],
             }
         }
@@ -277,8 +306,7 @@ class UniVTACAdapter(BaseAdapter):
             "source_file": h5_path.name,
             "total_frames": len(frames),
             "original_frames": T,
-            "sensor_ids": [k for k in SENSOR_CONFIG
-                           if f'tactile/{k}' in f],
+            "sensor_ids": sensor_ids,
         }
 
         return TLabelData(
@@ -645,6 +673,20 @@ class UniVTACAdapter(BaseAdapter):
             data = f[path][t]
             if data.ndim == 3:
                 return data
+        return None
+
+    def _detect_marker_count(self, f, sensor_id):
+        """v0.23: infer marker count from the marker dataset shape.
+
+        UniVTAC marker datasets have shape (T, 2, marker_size, 2); the number
+        of markers is shape[2]. Returns None when the dataset is missing or
+        the shape does not match, so callers can fall back to SENSOR_CONFIG.
+        """
+        path = f'tactile/{sensor_id}/marker'
+        if path in f:
+            shape = f[path].shape
+            if len(shape) == 4:
+                return int(shape[2])
         return None
 
     def _compute_confidence(self, tlabel_v2):
