@@ -96,7 +96,7 @@ Full dimension spec → [docs/tlabel-format.md](docs/tlabel-format.md)
 
 ## Supported Sensors
 
-**Dataset Adapters** (offline): GelSight/DIGIT (L3) · Daimon DM-TacClaw (L3) · PaXini PXCap (L2) · UniVTAC (L3) · TacQuad/AnyTouch (L3) · VTouch (L3) · YCB-Slide (L3)
+**Dataset Adapters** (offline): GelSight/DIGIT (L3) · Daimon DM-TacClaw (L3) · PaXini PXCap (L2) · UniVTAC (L3) · TacQuad/AnyTouch (L3) · VTouch (L3) · YCB-Slide (L3) · XELA uSkin/UniTac-NV (L1)
 
 **Real-time Adapters** (hardware): PaXini GEN3 (L2) · Daimon DM-Tac (L3)
 
