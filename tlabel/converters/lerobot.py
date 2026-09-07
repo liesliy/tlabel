@@ -188,7 +188,19 @@ def tlabel_to_lerobot(
     tactile_matrix = []
     for frame in frames:
         sv2 = frame.get("schema_v2", {})
-        row = [float(sv2.get(name, 0.0)) for name in feature_names]
+        row = []
+        for name in feature_names:
+            val = sv2.get(name, 0.0)
+            # 只转换数值类型，非数值字段用 0.0 填充
+            if val is None:
+                row.append(0.0)
+            elif isinstance(val, (int, float)):
+                row.append(float(val))
+            elif isinstance(val, bool):
+                row.append(1.0 if val else 0.0)
+            else:
+                # 字符串或其他类型用 0.0
+                row.append(0.0)
         tactile_matrix.append(row)
 
     tactile_array = np.array(tactile_matrix, dtype=np.float32)

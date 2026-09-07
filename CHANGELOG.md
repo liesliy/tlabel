@@ -4,6 +4,15 @@ All notable changes to the TLabel project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.23.1] - 2026-09-07
+
+### Fixed
+- Fix LeRobot converter crash when processing non-numeric fields (e.g., texture_class)
+
+### Added
+- Add LeRobot integration examples (examples/lerobot_integration.py)
+- Add LeRobot Integration section to README (English and Chinese) 
+
 ## [0.23.0] - 2026-09-04
 
 ### Added

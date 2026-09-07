@@ -126,6 +126,67 @@ pip install tlabel[all]        # 全部安装
 
 ---
 
+## LeRobot 集成
+
+TLabel 提供与 [LeRobot](https://github.com/huggingface/lerobot) 格式的双向转换器，无缝集成 LeRobot 生态。
+
+### LeRobot → TLabel
+
+将 LeRobot parquet 数据转换为 TLabel，用于标注和质量评估：
+
+```python
+from tlabel.converters import lerobot_to_tlabel
+
+# 加载 LeRobot episode 并转换为 TLabel
+data = lerobot_to_tlabel("path/to/lerobot_episode/")
+
+# 交互式标注
+data.review()  # 中英双语标注面板
+
+# 导出标注结果
+data.export("annotated_tlabel.json")
+```
+
+### TLabel → LeRobot
+
+将 TLabel 标注转换回 LeRobot 格式，用于训练：
+
+```python
+from tlabel.converters import tlabel_to_lerobot
+
+# 将 TLabel 标注转换为 LeRobot parquet 格式
+tlabel_to_lerobot(
+    "annotated_tlabel.json",
+    "path/to/lerobot_episode/",
+    tactile_field="observation.tactile",
+)
+```
+
+### 完整示例
+
+```python
+import tlabel
+from tlabel.converters import lerobot_to_tlabel, tlabel_to_lerobot
+
+# 1. 加载 LeRobot 数据
+lerobot_data = lerobot_to_tlabel("my_robot_episode/")
+
+# 2. 交互式标注（可选）
+lerobot_data.review()
+
+# 3. 导出为 TLabel 格式查看
+lerobot_data.export("tlabel_annotations.json")
+
+# 4. 转换回 LeRobot 格式（包含标注）
+tlabel_to_lerobot("tlabel_annotations.json", "my_robot_episode/")
+```
+
+### 依赖要求
+
+```bash
+pip install tlabel[lerobot]  # 或：pip install pyarrow
+```
+
 ## 论文
 
 **TLabel: A Unified Annotation Framework for Cross-Sensor Tactile Manipulation Data**

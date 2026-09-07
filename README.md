@@ -119,6 +119,67 @@ Adding a new sensor takes ~30 min — fork [contrib/adapter-template/](contrib/a
 └─────────────────────────────────────────────────┘
 ```
 
+## LeRobot Integration
+
+TLabel provides bidirectional converters for [LeRobot](https://github.com/huggingface/lerobot) format, enabling seamless integration with the LeRobot ecosystem.
+
+### LeRobot → TLabel
+
+Convert LeRobot parquet data to TLabel for annotation and quality assessment:
+
+```python
+from tlabel.converters import lerobot_to_tlabel
+
+# Load LeRobot episode and convert to TLabel
+data = lerobot_to_tlabel("path/to/lerobot_episode/")
+
+# Review and annotate
+data.review()  # Interactive bilingual annotation panel
+
+# Export annotated data
+data.export("annotated_tlabel.json")
+```
+
+### TLabel → LeRobot
+
+Convert TLabel annotations back to LeRobot format for training:
+
+```python
+from tlabel.converters import tlabel_to_lerobot
+
+# Convert TLabel annotations to LeRobot parquet format
+tlabel_to_lerobot(
+    "annotated_tlabel.json",
+    "path/to/lerobot_episode/",
+    tactile_field="observation.tactile",
+)
+```
+
+### Complete Example
+
+```python
+import tlabel
+from tlabel.converters import lerobot_to_tlabel, tlabel_to_lerobot
+
+# 1. Load LeRobot data
+lerobot_data = lerobot_to_tlabel("my_robot_episode/")
+
+# 2. Review and annotate (optional)
+lerobot_data.review()
+
+# 3. Export to TLabel format for inspection
+lerobot_data.export("tlabel_annotations.json")
+
+# 4. Convert back to LeRobot format (with annotations)
+tlabel_to_lerobot("tlabel_annotations.json", "my_robot_episode/")
+```
+
+### Requirements
+
+```bash
+pip install tlabel[lerobot]  # or: pip install pyarrow
+```
+
 ## Paper
 
 **TLabel: A Unified Annotation Framework for Cross-Sensor Tactile Manipulation Data**
