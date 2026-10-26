@@ -1,5 +1,11 @@
 # TLabel Format Specification
 
+> **📌 Informative document — not the normative specification.** This is a
+> tutorial-style walkthrough. The normative source of truth for the TLabel data
+> format is **[`docs/spec/tlabel-spec-v1.md`](spec/tlabel-spec-v1.md)** (Schema
+> V2, 14 dimensions). Where this document disagrees with that specification or
+> with the code, the specification governs (see its §11 for the conflict list).
+
 **Version:** 2.1.0  
 **Status:** Draft  
 **Last Updated:** 2026-07-24

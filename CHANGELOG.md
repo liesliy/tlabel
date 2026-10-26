@@ -4,6 +4,19 @@ All notable changes to the TLabel project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- **Normative format specification** (`docs/spec/tlabel-spec-v1.md`): a ROS REP-style normative specification for the TLabel data format — numbered normative clauses (`S-x.y-z`), RFC 2119 keywords, per-dimension field definitions (type, unit, requiredness, compliance-level threshold, example), compliance-level (L1-L4) decision rules, adapter conformance requirements, and a conformance-test checklist (C-01…C-16). `docs/tlabel-format.md` and `docs/annotation-spec.md` are now explicitly marked as *informative* and point at the specification.
+- **Scenario templates** (`tlabel/scenarios/`): four YAML scenario definitions — `gelsight_grasp`, `paxini_force_control`, `tashan_fingertip`, `xela_uskin` — describing which schema fields, primitives and events matter for each data-collection scenario. New CLI commands: `tlabel template list` and `tlabel template validate [<id>|--all]`.
+
+### Changed
+- `pyyaml>=5.4` is now a core dependency (required by the scenario template loader).
+- Packaging: `tlabel/scenarios/*.yaml` is now included in the wheel and sdist via `package-data` and a new `MANIFEST.in`.
+
+### Documentation
+- 20 documentation/code inconsistencies found while writing the specification are catalogued in `docs/spec/tlabel-spec-v1.md` §11. Notable ones: several `docs/` pages still describe the deprecated pre-v2.0 flat feature space, and `tlabel-format.md` documents top-level keys (`sensor_info`/`episodes`) and enum value sets that do not match the implementation.
+
 ## [0.23.1] - 2026-09-07
 
 ### Fixed
