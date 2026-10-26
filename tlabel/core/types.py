@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from tlabel.core.schema import TLabelSchemaV2, SCHEMA_V2_FIELD_NAMES
+from tlabel.core.capabilities import warn_if_invalid_capabilities
 
 
 def _sv2_scalar(frame: "TLabelFrame", field: str, default: float = 0.0) -> float:
@@ -215,6 +216,9 @@ class TLabelData:
         self.sensor_info = sensor_info
         self.episode_info = episode_info
         self.capabilities = capabilities
+        # v0.23.3：capabilities 合规性检查（仅告警，不改写输出；
+        # 0.24.0 起改为出口归一化）。详见 tlabel/core/capabilities.py。
+        warn_if_invalid_capabilities(capabilities, source="TLabelData")
         self.schema_version = schema_version
         self.sensor_id = sensor_id
         self.calibration_params = calibration_params or {}

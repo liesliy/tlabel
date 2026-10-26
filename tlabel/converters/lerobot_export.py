@@ -39,6 +39,7 @@ except ImportError:
 
 from tlabel.core.types import TLabelData, TLabelFrame
 from tlabel.core.schema import TLabelSchemaV2, SCHEMA_V2_FIELD_NAMES
+from tlabel.converters._encoding import encode_schema_v2
 
 
 # ================================================================
@@ -50,81 +51,16 @@ def _encode_schema_v2_to_vector(sv2: TLabelSchemaV2) -> List[float]:
     将 TLabelSchemaV2 编码为 14 维 float32 向量，
     与 SCHEMA_V2_FIELD_NAMES 顺序一致。
 
-    编码规则（与 tlabel/converters/lerobot.py 保持一致）：
+    编码规则由 ``tlabel/converters/_encoding.py`` 统一提供，与写回路径
+    ``tlabel/converters/lerobot.py`` 共用同一实现（v0.23.3 起）。
+
+    编码规则：
       - bool: 1.0 / 0.0
-      - 标量 float: 直接取值，None → 0.0
+      - 标量 float: 直接取值，None → 0.0（confidence 缺省 1.0）
       - 向量 (list/tuple): 取 L2 范数，None → 0.0
-      - str 枚举: 映射为类别索引，None → -1.0
+      - str 枚举: 映射为类别索引，None / 未知 → -1.0
     """
-    # 枚举 → 索引映射
-    CONTACT_REGION_MAP = {
-        v: float(i) for i, v in enumerate(
-            ["palmar", "digital", "lateral", "proximal", "distal", "dorsal", "other"]
-        )
-    }
-    MANIPULATION_PHASE_MAP = {
-        v: float(i) for i, v in enumerate(
-            ["pre_contact", "approach", "grasp", "lift", "hold", "place"]
-        )
-    }
-    TEXTURE_CLASS_MAP = {
-        v: float(i) for i, v in enumerate(
-            ["smooth", "rough", "granular", "fibrous", "sticky", "slippery"]
-        )
-    }
-    COMPLIANCE_LEVEL_MAP = {"L1": 1.0, "L2": 2.0, "L3": 3.0, "L4": 4.0}
-
-    def _vec_norm(v) -> float:
-        if v is None:
-            return 0.0
-        try:
-            return float(math.sqrt(sum(float(x) ** 2 for x in v)))
-        except (TypeError, ValueError):
-            return 0.0
-
-    def _enum_idx(v, mapping, default=-1.0) -> float:
-        if v is None:
-            return default
-        return float(mapping.get(v, default))
-
-    def _scalar(v, default=0.0) -> float:
-        if v is None:
-            return default
-        try:
-            return float(v)
-        except (TypeError, ValueError):
-            return default
-
-    return [
-        # contact: bool → 1.0 / 0.0
-        1.0 if sv2.contact else 0.0,
-        # contact_centroid: [x, y] | None → L2 norm
-        _vec_norm(sv2.contact_centroid),
-        # contact_region: str | None → 枚举索引
-        _enum_idx(sv2.contact_region, CONTACT_REGION_MAP, default=-1.0),
-        # force_magnitude: float | None → 标量
-        _scalar(sv2.force_magnitude),
-        # force_vector: [Fx, Fy, Fz] | None → L2 norm
-        _vec_norm(sv2.force_vector),
-        # torque_vector: [Mx, My, Mz] | None → L2 norm
-        _vec_norm(sv2.torque_vector),
-        # slip_event: bool → 1.0 / 0.0
-        1.0 if sv2.slip_event else 0.0,
-        # slip_velocity: [vx, vy] | None → L2 norm
-        _vec_norm(sv2.slip_velocity),
-        # manipulation_phase: str | None → 枚举索引
-        _enum_idx(sv2.manipulation_phase, MANIPULATION_PHASE_MAP, default=-1.0),
-        # texture_class: str | None → 枚举索引
-        _enum_idx(sv2.texture_class, TEXTURE_CLASS_MAP, default=-1.0),
-        # object_deformation: float | None → 标量
-        _scalar(sv2.object_deformation),
-        # temperature: float | None → 标量
-        _scalar(sv2.temperature),
-        # confidence: float
-        _scalar(sv2.confidence, default=1.0),
-        # compliance_level: str → 级别数字
-        COMPLIANCE_LEVEL_MAP.get(sv2.compliance_level, 1.0),
-    ]
+    return encode_schema_v2(sv2)
 
 
 # ================================================================

@@ -85,7 +85,8 @@ class TashanTsFAAdapter(DataAdapterBase):
             "object_deformation": False,
             "temperature": False,
             "confidence": True,            # extract_schema 输出 confidence
-            "compliance_level": True,      # extract_schema 输出 compliance_level
+            # 注意：compliance_level 是帧级元字段，不属于 capabilities 能力键
+            # （规范 S-7.4-2 / C-15），v0.23.3 起不再出现在此处。
         }
 
     def get_sensor_info(self) -> Dict[str, Any]:

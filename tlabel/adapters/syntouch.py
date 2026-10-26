@@ -476,7 +476,8 @@ class SynTouchBioTacAdapter(DataAdapterBase):
             "object_deformation": True,
             "temperature": True,
             "confidence": True,
-            "compliance_level": True,
+            # 注意：compliance_level 是帧级元字段，不属于 capabilities 能力键
+            # （规范 S-7.4-2 / C-15），v0.23.3 起不再出现在此处。
         }
 
     # ─── 传感器信息 ──────────────────────────────────────────────────────

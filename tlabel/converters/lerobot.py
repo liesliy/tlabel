@@ -28,6 +28,8 @@ except ImportError:
 
 from tlabel.core.types import TLabelData, TLabelFrame
 from tlabel.core.schema import TLabelSchemaV2
+from tlabel.converters._encoding import encode_schema_v2
+from tlabel.core.capabilities import filter_capabilities
 
 
 def lerobot_to_tlabel(
@@ -117,7 +119,11 @@ def lerobot_to_tlabel(
         "task": meta.get("task", ""),
     }
     
-    capabilities = {name: True for name in feature_names} if feature_names else {}
+    # LeRobot 的 feature 名可能来自任意 parquet 列，不保证落在 Schema V2 的
+    # 13 个能力键内，因此只保留合法交集（v0.23.3 起）。
+    capabilities = filter_capabilities(
+        {name: True for name in feature_names} if feature_names else {}
+    )
     
     return TLabelData(
         frames=frames,
@@ -185,23 +191,12 @@ def tlabel_to_lerobot(
         feature_names = list(sv2.keys()) if sv2 else []
 
     # 构建触觉特征矩阵
+    # 编码规则统一由 converters/_encoding.py 提供：向量取 L2 范数、
+    # 枚举映射类别索引、bool → 1.0/0.0，禁止对非标量字段静默置 0.0。
     tactile_matrix = []
     for frame in frames:
-        sv2 = frame.get("schema_v2", {})
-        row = []
-        for name in feature_names:
-            val = sv2.get(name, 0.0)
-            # 只转换数值类型，非数值字段用 0.0 填充
-            if val is None:
-                row.append(0.0)
-            elif isinstance(val, (int, float)):
-                row.append(float(val))
-            elif isinstance(val, bool):
-                row.append(1.0 if val else 0.0)
-            else:
-                # 字符串或其他类型用 0.0
-                row.append(0.0)
-        tactile_matrix.append(row)
+        sv2 = frame.get("schema_v2", {}) or {}
+        tactile_matrix.append(encode_schema_v2(sv2, feature_names))
 
     tactile_array = np.array(tactile_matrix, dtype=np.float32)
 

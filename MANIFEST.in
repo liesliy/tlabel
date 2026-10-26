@@ -6,3 +6,4 @@ include TLabel发版规范与平台规则.md
 recursive-include tlabel/scenarios *.yaml
 recursive-include tlabel/demo_data *.json
 recursive-include docs *.md
+prune docs/internal

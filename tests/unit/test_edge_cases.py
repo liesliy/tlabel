@@ -22,6 +22,7 @@ import numpy as np
 import pytest
 
 from tlabel.core.schema import TLabelSchemaV2, SCHEMA_V2_FIELD_NAMES, VALID_COMPLIANCE_LEVELS
+from tlabel.core.capabilities import CAPABILITY_KEYS
 from tlabel.core.types import TLabelData, TLabelFrame
 from tlabel.core.registry import (
     list_builtin_adapters,
@@ -504,12 +505,19 @@ class TestCapabilitiesCompleteness:
         )
 
     def test_syntouch_capabilities_cover_all_schema_fields(self, syntouch_adapter):
-        """syntouch 适配器的 capabilities 应覆盖所有 14 个 Schema V2 字段"""
+        """syntouch 适配器的 capabilities 应覆盖全部 13 个合法能力键
+
+        注意：compliance_level 是帧级元字段，不属于能力键
+        （规范 S-7.4-2 / C-15），v0.23.3 起不得出现在 capabilities 中。
+        """
         caps = syntouch_adapter.get_capabilities()
-        for field in SCHEMA_V2_FIELD_NAMES:
+        for field in sorted(CAPABILITY_KEYS):
             assert field in caps, (
                 f"syntouch capabilities 缺少字段: {field}"
             )
+        assert "compliance_level" not in caps, (
+            "compliance_level 是帧级元字段，不属于 capabilities 能力键"
+        )
 
     def test_syntouch_capabilities_all_bool(self, syntouch_adapter):
         """capabilities 的每个值都应是 bool 类型"""

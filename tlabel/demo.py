@@ -9,6 +9,7 @@ from typing import Optional, List
 
 from tlabel.core.types import TLabelData, TLabelFrame
 from tlabel.core.schema import TLabelSchemaV2
+from tlabel.core.capabilities import filter_capabilities
 
 # 内置Demo数据目录
 _DEMO_DIR = Path(__file__).parent / "demo_data"
@@ -155,11 +156,26 @@ def demo(sensor: Optional[str] = None, **kwargs) -> TLabelData:
         )
         frames.append(frame)
 
+    # v0.23.3: 内置 demo 数据文件携带的是 22 维时代的旧 caps 结构
+    # （has_image / dimensions / 旧字段名），与 Schema V2 的 13 个能力键
+    # 没有可靠的逐键对应关系。此处采用"读宽容、写规范"策略：
+    #   - 对外只声明最小合法能力集（contact 为 schema 必填项）；
+    #   - 原始旧 caps 完整保留在 episode_info.legacy_capabilities，不丢信息。
+    raw_caps = raw.get("capabilities", {}) or {}
+    normalized_caps = filter_capabilities(raw_caps)
+    episode_info = dict(raw.get("episode", {}) or {})
+    if raw_caps and normalized_caps != raw_caps:
+        # 旧 caps 未被完整表达（含无交集的旧结构），原始内容原样留档
+        episode_info.setdefault("legacy_capabilities", raw_caps)
+    if not normalized_caps:
+        # 旧结构与 13 键无交集：退化为最小合法声明
+        normalized_caps = {"contact": True}
+
     data = TLabelData(
         frames=frames,
         sensor_info=raw.get("sensor", {}),
-        episode_info=raw.get("episode", {}),
-        capabilities=raw.get("capabilities", {}),
+        episode_info=episode_info,
+        capabilities=normalized_caps,
         schema_version=raw.get("schema_version", "0.4.0"),
     )
 
@@ -401,7 +417,7 @@ def _build_realtime_sensor_demo(sensor: str) -> TLabelData:
         }
         sensor_id = "daimon_dm_tac"
 
-    # Schema V2 capabilities (14维)
+    # Schema V2 capabilities（13 个合法能力键，compliance_level 属帧级元字段）
     caps = {
         "contact": True, "contact_centroid": True,
         "contact_region": False, "force_magnitude": True,
@@ -409,7 +425,7 @@ def _build_realtime_sensor_demo(sensor: str) -> TLabelData:
         "slip_event": True, "slip_velocity": False,
         "manipulation_phase": True, "texture_class": False,
         "object_deformation": True, "temperature": False,
-        "confidence": True, "compliance_level": True,
+        "confidence": True,
     }
 
     return TLabelData(

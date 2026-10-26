@@ -46,7 +46,8 @@ class PaxiniPX6DAdapter(SensorAdapterBase):
     def get_capabilities(self) -> Dict[str, bool]:
         """返回占位符能力声明（全部为 False，表示暂未实现）
 
-        包含 Schema V2 所有 14 个字段对应的能力 key，值统一为 False。
+        包含 Schema V2 的 13 个能力键，值统一为 False。
+        注意：compliance_level 是帧级元字段，不属于能力键（规范 S-7.4-2）。
         """
         return {
             "contact": False,
@@ -62,7 +63,6 @@ class PaxiniPX6DAdapter(SensorAdapterBase):
             "object_deformation": False,
             "temperature": False,
             "confidence": False,
-            "compliance_level": False,
         }
 
     def get_sensor_info(self) -> Dict[str, Any]:

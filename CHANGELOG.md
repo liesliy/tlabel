@@ -4,6 +4,26 @@ All notable changes to the TLabel project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.23.3] - 2026-10-26
+
+### Fixed
+
+- **LeRobot 写回路径静默丢失向量与枚举字段**（数据损坏，优先级最高）：`tlabel_to_lerobot()` 在把标注写回已有 LeRobot 数据集时，对所有非标量字段一律填 `0.0`。这导致向量字段（`contact_centroid` / `force_vector` / `torque_vector` / `slip_velocity`）和枚举字段（`contact_region` / `manipulation_phase` / `texture_class` / `compliance_level`）被静默抹平——不报错、不告警。0.23.1 的崩溃修复只是把异常改成了静默丢数据。现在两条 LeRobot 路径（`lerobot.py` 写回 / `lerobot_export.py` 新建）共用同一套编码实现，语义一致：向量取 L2 范数、枚举映射类别索引、缺失枚举用 `-1.0` 哨兵。
+- **`capabilities` 中的 `compliance_level` 键**：`syntouch`、`tashan_ts_f_a`、`paxini_px6d` 三个适配器与 `demo.py` 的合成能力声明曾把 `compliance_level` 当作能力键输出。它是帧级元字段，不属于能力声明（规范 S-7.4-2 / C-15），已移除。这些文件此前无法通过仓库自带的 JSON Schema 校验（`additionalProperties: false`）。
+- **LeRobot 导入的 `capabilities` 键未做白名单**：`lerobot_to_tlabel()` 曾把 parquet 的任意 feature 名直接当作能力键，可能产出 schema 非法文件。现在只保留 13 个合法能力键的交集。
+- **内置 demo 数据的旧 `capabilities`**：`tlabel/demo_data/*.json` 携带 22 维时代的旧能力结构（`has_image` / `dimensions` / 旧字段名），与 Schema V2 的 13 键无可靠对应。加载时归一化为最小合法声明，原始结构完整保留在 `episode_info["legacy_capabilities"]`。
+
+### Added
+
+- **`tlabel/core/capabilities.py`**：13 个合法能力键的单一事实源，以及 `validate_capabilities()` / `filter_capabilities()` / `warn_if_invalid_capabilities()`。`TLabelData` 构造时会对不合规的 `capabilities` 发出 `UserWarning`（本版本只告警、不改写输出；出口归一化与 strict 模式留待 0.24.0）。
+- **`tlabel/converters/_encoding.py`**：Schema V2 → 14 维向量的共享编码模块，`lerobot.py` 与 `lerobot_export.py` 共用。
+- 新增 51 个测试：`tests/unit/test_lerobot_encoding.py`（编码正确性、两条路径一致性、端到端写回回归）与 `tests/unit/test_capabilities.py`（键集与 JSON Schema 一致性、校验/过滤、出口告警、脏源回归）。
+
+### Notes
+
+- 本次修复会改变 `tlabel_to_lerobot()` 的**输出数值**：此前被写成 `0.0` 的向量与枚举字段现在有真实编码。这属于 bug fix，但下游若有基于旧（错误）输出的基线，需要重新生成。
+- 仍有 10 个适配器返回旧 22/23 键能力字典（`gelsight` / `paxini` / `daimon` / `daimon_dm_tac` / `tacquad` / `touchd` / `univtac` / `vtouch` / `ycb_slide` / `paxini_gen3`），会在 `TLabelData` 构造时产生告警。迁移计划见 `docs/internal/PIT7_capabilities_migration_plan.md`，安排在 0.24.0 完成。
+
 ## [0.23.2] - 2026-10-26
 
 ### Added
