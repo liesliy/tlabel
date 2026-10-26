@@ -27,6 +27,7 @@ classifiers = [
 
 dependencies = [
     "numpy>=1.20",
+    "pyyaml>=5.4",
 ]
 
 [project.optional-dependencies]
@@ -51,5 +52,5 @@ Homepage = "https://github.com/liesliy/tlabel"
 include = ["tlabel*"]
 
 [tool.setuptools.package-data]
-tlabel = ["demo_data/*.json"]
+tlabel = ["demo_data/*.json", "scenarios/*.yaml"]
 

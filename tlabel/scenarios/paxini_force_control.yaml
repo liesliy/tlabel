@@ -1,0 +1,40 @@
+id: paxini_force_control
+name: PaXini 力控
+description: >
+  PaXini GEN3 分布式压力阵列执行力控任务（恒力按压 / 夹持 / 缓升缓降）时的
+  标注基线。压力阵列可提供接触、法向力与接触质心，但无法推断剪切方向，
+  因此不要求 3D 力向量，场景基线为 L2（力感知）。
+  关注力的上升-保持-释放曲线与稳定抓握区间。
+sensors:
+  - PaXini GEN3
+adapters:
+  - paxini_gen3
+schema_fields:
+  - contact
+  - contact_centroid
+  - force_magnitude
+  - slip_event
+  - manipulation_phase
+  - object_deformation
+  - confidence
+  - compliance_level
+primitives:
+  - reach
+  - grasp
+  - press
+  - squeeze
+  - lift
+  - wrap
+events:
+  - contact_onset
+  - contact_loss
+  - slip
+  - force_spike
+  - stable_grip
+min_compliance_level: L2
+constraints:
+  required_when_contact:
+    - contact_centroid
+  recommended_optional:
+    - manipulation_phase
+    - object_deformation

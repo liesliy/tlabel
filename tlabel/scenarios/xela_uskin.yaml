@@ -1,0 +1,36 @@
+id: xela_uskin
+name: XELA uSkin 磁触觉阵列
+description: >
+  XELA Robotics uSkin 磁触觉阵列（uSPa 46，4x6 taxel，Hall-effect 3 轴）
+  的标注基线。每个 taxel 同时测量 X/Y 剪切与 Z 法向力，可提供接触、
+  接触质心与力信息；但力单位为原始值，需提供 force_scale 标定系数才能
+  输出 SI 单位，默认场景基线为 L1（基础）。关注接触建立与力突变事件。
+sensors:
+  - XELA uSkin uSPa 46
+adapters:
+  - xela
+schema_fields:
+  - contact
+  - contact_centroid
+  - force_magnitude
+  - force_vector
+  - manipulation_phase
+  - confidence
+  - compliance_level
+primitives:
+  - reach
+  - press
+  - grasp
+  - wrap
+  - wipe
+  - lift
+events:
+  - contact_onset
+  - contact_loss
+  - force_spike
+min_compliance_level: L1
+constraints:
+  required_when_contact:
+    - contact_centroid
+  recommended_optional:
+    - manipulation_phase

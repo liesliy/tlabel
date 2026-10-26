@@ -6,8 +6,11 @@ TLabel CLI — 命令行工具
   tlabel list               列出所有已注册的适配器
   tlabel info <adapter>     查看适配器详细信息
   tlabel version            显示版本号
+  tlabel template list      列出所有场景模板
+  tlabel template validate  校验场景模板（id 或 --all）
 
 v0.17.0 更新: validate 命令支持 14 维 Schema V2 校验，向后兼容 22 维旧格式
+v0.24.0 更新: 新增 template 命令（场景模板 list / validate）
 """
 
 import sys
@@ -571,6 +574,73 @@ def cmd_export(args):
         return 1
 
 
+def cmd_template_list(args):
+    """执行 template list 子命令 — 列出所有场景模板"""
+    from tlabel.scenarios import list_scenarios, get_scenario
+
+    ids = list_scenarios()
+
+    print("📋 TLabel 场景模板")
+    print("=" * 60)
+
+    if not ids:
+        print("  暂无场景模板")
+        return 0
+
+    for sid in ids:
+        try:
+            tpl = get_scenario(sid)
+            adapters = ",".join(tpl.adapters) if tpl.adapters else "-"
+            print(f"  {sid:22s} {tpl.name:20s} 适配器: {adapters:16s} 最低合规: {tpl.min_compliance_level}")
+        except Exception as e:
+            print(f"  {sid:22s} ⚠️ 加载失败: {e}")
+
+    print(f"\n共 {len(ids)} 个场景模板")
+    return 0
+
+
+def cmd_template_validate(args):
+    """执行 template validate 子命令 — 校验指定或全部场景模板"""
+    from tlabel.scenarios import validate_scenario, validate_all_scenarios, list_scenarios
+
+    scenario_id = getattr(args, "id", None)
+    validate_all = getattr(args, "all", False)
+
+    if not scenario_id and not validate_all:
+        print("❌ 请指定场景模板 id，或使用 --all 校验全部模板")
+        print(f"   可用模板: {list_scenarios()}")
+        return 1
+
+    print("🔍 校验场景模板")
+    print("=" * 60)
+
+    if scenario_id:
+        targets = {scenario_id: validate_scenario(scenario_id)}
+    else:
+        targets = validate_all_scenarios()
+
+    passed = 0
+    failed = 0
+    for sid, (ok, errors) in targets.items():
+        if ok:
+            passed += 1
+            print(f"✅ {sid} — 通过")
+        else:
+            failed += 1
+            print(f"❌ {sid} — 失败")
+            for err in errors:
+                print(f"     • {err}")
+
+    print("=" * 60)
+    print(f"结果: {passed} 通过, {failed} 失败")
+
+    if failed:
+        print("\n❌ 校验未通过")
+        return 1
+    print("\n✅ 校验通过")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="tlabel",
@@ -621,13 +691,39 @@ def main():
     )
     p_export.set_defaults(func=cmd_export)
 
+    # template
+    p_template = subparsers.add_parser("template", help="场景模板（scenario template）管理")
+    template_sub = p_template.add_subparsers(dest="template_command", help="可用子命令")
+
+    # template list
+    p_tpl_list = template_sub.add_parser("list", help="列出所有场景模板")
+    p_tpl_list.set_defaults(func=cmd_template_list)
+
+    # template validate
+    p_tpl_validate = template_sub.add_parser("validate", help="校验场景模板（字段名/primitive 名合法性）")
+    p_tpl_validate.add_argument(
+        "id", nargs="?", default=None,
+        help="场景模板 id（省略时配合 --all 校验全部）",
+    )
+    p_tpl_validate.add_argument(
+        "--all", action="store_true",
+        help="校验全部场景模板",
+    )
+    p_tpl_validate.set_defaults(func=cmd_template_validate)
+
     args = parser.parse_args()
 
     if args.command is None:
         parser.print_help()
         return 0
 
-    return args.func(args)
+    func = getattr(args, "func", None)
+    if func is None:
+        # 例如 `tlabel template` 未指定子命令
+        parser.print_help()
+        return 0
+
+    return func(args)
 
 
 if __name__ == "__main__":

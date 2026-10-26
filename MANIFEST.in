@@ -1,0 +1,6 @@
+include README.md
+include LICENSE
+include CHANGELOG.md
+include VERSION
+recursive-include tlabel/scenarios *.yaml
+recursive-include tlabel/demo_data *.json

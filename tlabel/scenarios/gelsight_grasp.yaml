@@ -1,0 +1,49 @@
+id: gelsight_grasp
+name: GelSight 视触觉抓取
+description: >
+  GelSight 系列视触觉传感器（GelSight Mini / DIGIT）执行抓取-提升任务时的
+  标注基线。视触觉可提供高分辨率接触几何与形变场，适合标注接触区域、
+  接触质心、形变与纹理类别；若数据附带标定力向量则合规等级可升级至 L3。
+  关注「接触建立 → 稳定抓握 → 提升 → 释放」的完整时序。
+sensors:
+  - GelSight Mini
+  - GelSight DIGIT
+adapters:
+  - gelsight
+schema_fields:
+  - contact
+  - contact_centroid
+  - contact_region
+  - force_magnitude
+  - force_vector
+  - slip_event
+  - slip_velocity
+  - manipulation_phase
+  - texture_class
+  - object_deformation
+  - confidence
+  - compliance_level
+primitives:
+  - reach
+  - grasp
+  - press
+  - wrap
+  - lift
+  - squeeze
+events:
+  - contact_onset
+  - contact_loss
+  - slip
+  - force_spike
+  - stable_grip
+  - deformation_anomaly
+min_compliance_level: L2
+constraints:
+  required_when_contact:
+    - contact_centroid
+  required_when_slip:
+    - slip_velocity
+  recommended_optional:
+    - manipulation_phase
+    - texture_class
+    - object_deformation

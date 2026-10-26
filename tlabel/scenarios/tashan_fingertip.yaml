@@ -1,0 +1,31 @@
+id: tashan_fingertip
+name: 他山科技 TS-F-A 指尖三维力
+description: >
+  他山科技 TS-F-A 指尖力传感器（RoboMIND V2.0 / AgileX 双臂）的标注基线。
+  TS-F-A 为纯力传感器（非视觉触觉），提供接触判定与完整 3D 力向量
+  [fx, fy, nf]，因此合规等级为 L3；无接触质心、无滑移与形变能力，
+  不标注视觉类字段。关注接触建立与力突变事件。
+sensors:
+  - Tashan TS-F-A
+adapters:
+  - tashan_ts_f_a
+schema_fields:
+  - contact
+  - force_magnitude
+  - force_vector
+  - manipulation_phase
+  - confidence
+  - compliance_level
+primitives:
+  - reach
+  - press
+  - grasp
+  - lift
+events:
+  - contact_onset
+  - contact_loss
+  - force_spike
+min_compliance_level: L3
+constraints:
+  recommended_optional:
+    - manipulation_phase
