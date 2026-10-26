@@ -4,7 +4,7 @@ All notable changes to the TLabel project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.23.2] - 2026-10-26
 
 ### Added
 - **Normative format specification** (`docs/spec/tlabel-spec-v1.md`): a ROS REP-style normative specification for the TLabel data format — numbered normative clauses (`S-x.y-z`), RFC 2119 keywords, per-dimension field definitions (type, unit, requiredness, compliance-level threshold, example), compliance-level (L1-L4) decision rules, adapter conformance requirements, and a conformance-test checklist (C-01…C-16). `docs/tlabel-format.md` and `docs/annotation-spec.md` are now explicitly marked as *informative* and point at the specification.
