@@ -29,6 +29,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - LeRobot dataset exporter: create new LeRobot v2.1 datasets from TLabel annotations
 - UI: LeRobot export panel in the Export tab
 - Registry: new `lerobot_create` exporter plugin
+
+## [0.22.3] - 2026-09-03
+### Added
+- **Schema v2.2 `raw_sensor_values`**: new optional field for raw sensor data retention, split out from `data_quality`
+### Changed
+- Tashan TS-F-A adapter now retains raw data in `raw_sensor_values` instead of `data_quality`
+- `get_capabilities()` standardized to the 14-dimensional Schema V2 format
+- Design document updated to v2.2 (three-layer sensor info architecture)
+
+## [0.22.2] - 2026-09-03
+### Changed
+- Removed redundant sensor information from `provenance`; sensor info now follows the three-layer architecture without duplication
+
+## [0.22.1] - 2026-09-03
+### Fixed
+- Removed invalid fields (`slip_direction`, `sensor_id`, `sensor_specific`) from the `TLabelSchemaV2` constructor call in `TashanTsFAAdapter`
+
 ## [0.22.0] - 2026-09-03
 
 ### Added
@@ -76,17 +93,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.19.0] - 2026-08-06
 
 ### Added
-- **CLI convert commands**: `tlabel convert` for single-file format conversion, `tlabel batch-convert` for batch directory conversion. Supports 9 data adapters (gelsight, paxini, daimon, tlabel, touchd, univtac, vtouch, ycb_slide, tacquad) and 2 output formats (lerobot, ftp1)
-- **CLI adapter discovery**: `tlabel list-adapters` shows all available DataAdapters and SensorAdapters with supported formats; `tlabel adapter-info <name>` displays detailed adapter information including field mapping table and compliance level
-- **Converter base layer** (`converters/base.py`): Unified converter interface (`BaseConverter` with `export()` method), wrapping `LeRobotConverter` and `FTP1Converter` for consistent API
+- **Converter base layer** (`converters/base.py`): Unified converter interface (`BaseConverter` with `export()` method) plus a `get_converter()` registry, wrapping `LeRobotConverter` and `FTP1Converter` behind a consistent API
 
 ### Fixed
 - **lerobot.py `_safe_float()`**: Fixed crash when converting vector/list fields (e.g., `contact_centroid`) — now safely handles vectors (takes magnitude), booleans (0/1), and None (0.0)
 
-### Tests
-- 28 new tests for CLI convert commands (tests/test_cli_convert.py)
-- 14 regression tests passing (tests/test_cli.py)
-- End-to-end validation: tlabel→ftp1 (150 frames .zarr), tlabel→lerobot (150 frames parquet+meta), batch-convert (3 files)
+### Notes
+- **This entry was corrected on 2026-10-26.** An earlier revision listed CLI commands (`tlabel convert`, `tlabel batch-convert`, `tlabel list-adapters`, `tlabel adapter-info`) and a 28-test suite for them. Those were developed on the `feat/v0.19.0-convert-cli` branch but were never merged into `main`, and therefore were never part of any published release. Only the two items above actually shipped in 0.19.0.
+- **Known gap:** `converters/base.py` and the `_safe_float()` fix were not carried forward when development resumed on `main` for 0.20.0, and are absent from 0.23.1. Tracked for restoration.
 
 ## [0.18.2] - 2026-08-03
 
