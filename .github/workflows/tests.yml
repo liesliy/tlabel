@@ -9,9 +9,11 @@ on:
 permissions:
   contents: read
 
+# 固定 ubuntu-22.04：ubuntu-latest 已升到 26.04，其 setup-python 不再提供
+# Python 3.9，而 requires-python >=3.8 需要覆盖 3.9。等放弃 3.9 后再改回 latest。
 jobs:
   unit-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
@@ -34,7 +36,7 @@ jobs:
           pytest tests/unit/ -v --tb=short
 
   integration-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -58,7 +60,7 @@ jobs:
         continue-on-error: true
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
