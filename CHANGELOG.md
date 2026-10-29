@@ -4,6 +4,21 @@ All notable changes to the TLabel project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.24.1] - 2026-10-29
+
+补发版，修正 v0.24.0 的打包缺陷。
+
+### Fixed
+
+- **`lerobot` extra 缺失，LeRobot 读写装完包即报错**：`tlabel/converters/lerobot.py` 有三处 `Table.to_pandas()`，但 pyproject 从未声明过 LeRobot 相关的 extra，主依赖也只有 numpy + pyyaml。用户执行 `pip install tlabel` 后调用 LeRobot 导出/写回会直接 `ModuleNotFoundError: No module named 'pandas'`。新增 `lerobot = ["pyarrow>=10.0", "pandas>=1.5"]`，并同步进 `all` 与 `dev`。
+- 无代码改动，无 API 变化。
+
+### CI
+
+- 固定 runners 到 `ubuntu-22.04`：`ubuntu-latest` 已升级到 Ubuntu 26.04，其 setup-python 不再提供 Python 3.9，导致 unit-tests (3.9) 长期失败（自 v0.23.3 起）。
+
+---
+
 ## [0.24.0] - 2026-10-29
 
 > 迁移说明见 [MIGRATION.md](MIGRATION.md) 的 v0.23 → v0.24 一节。
