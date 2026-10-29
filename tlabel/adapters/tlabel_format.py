@@ -7,16 +7,27 @@ v0.17: 新增 Schema V2 支持 — 可加载/验证/导出14维结构化标注�
 """
 
 import json
+import warnings
 from pathlib import Path
 from typing import Optional, Union, Dict, List, Tuple
 
 from tlabel.adapters.base import BaseAdapter
+from tlabel.core.capabilities import (
+    CAPABILITY_KEYS,
+    filter_capabilities,
+    validate_capabilities,
+)
 from tlabel.core.types import TLabelData, TLabelFrame
 from tlabel.core.schema import TLabelSchemaV2, SCHEMA_V2_FIELD_NAMES, VALID_COMPLIANCE_LEVELS
 
 
 class TLabelAdapter(BaseAdapter):
     """TLabel Format JSON 适配器"""
+
+    def __init__(self):
+        # 无参 get_capabilities() 的返回值：load() 成功后缓存本次归一化的
+        # caps，未加载过时给保守空声明，避免遍历型调用方拿不到数据源。
+        self._last_capabilities: Dict[str, bool] = {"contact": False}
 
     @property
     def name(self) -> str:
@@ -32,13 +43,57 @@ class TLabelAdapter(BaseAdapter):
         with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
         return raw.get("sensor", {})
-    
-    def get_capabilities(self, file_path: Union[str, Path]) -> Dict:
-        """获取能力信息"""
+
+    def get_capabilities(self) -> Dict[str, bool]:
+        """返回最近一次 load() 归一化后的能力声明（无数据源时为保守空声明）。
+
+        TLabel 适配器没有固定数据源，能力取决于读的是哪个文件。基类要求
+        无参可调用，因此这里返回缓存值；需要按文件读取请用
+        ``get_capabilities_for_file()``。
+        """
+        return dict(self._last_capabilities)
+
+    def get_capabilities_for_file(self, file_path: Union[str, Path]) -> Dict[str, bool]:
+        """按文件读取能力声明，并按 13 键白名单归一化。"""
         path = Path(file_path)
         with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
-        return raw.get("capabilities", {})
+        return self._normalize_capabilities(raw.get("capabilities", {}), str(path))
+
+    def _normalize_capabilities(self, raw_caps: Dict, source: str) -> Dict[str, bool]:
+        """把文件里的 capabilities 收敛到 13 键，并保留原始值以免信息丢失。
+
+        读宽容、写规范：旧 22 键文件仍可加载，但导出的新文件必须合规。
+        被剔除的键通过 warning 提示，并原样保存在
+        ``episode_info["legacy_capabilities"]`` 里。
+        """
+        if not isinstance(raw_caps, dict):
+            return {"contact": False}
+
+        cleaned = filter_capabilities(raw_caps)
+        dropped = {k: v for k, v in raw_caps.items() if k not in CAPABILITY_KEYS}
+
+        if dropped:
+            warnings.warn(
+                f"[tlabel] {source} 的 capabilities 含 {len(dropped)} 个非法键，"
+                f"已从 capabilities 剔除并保留在 episode_info.legacy_capabilities："
+                + ", ".join(sorted(dropped)),
+                UserWarning,
+                stacklevel=3,
+            )
+
+        # contact 是必填键，文件没写时按"未知即不声明"处理。
+        cleaned.setdefault("contact", False)
+
+        problems = validate_capabilities(cleaned)
+        if problems:
+            warnings.warn(
+                f"[tlabel] {source} 归一化后仍不合规：" + "；".join(problems),
+                UserWarning,
+                stacklevel=3,
+            )
+
+        return cleaned
 
     def extract_schema(self, raw_frame_data: Union[TLabelFrame, Dict]) -> TLabelSchemaV2:
         """将原始数据帧转换为 TLabel Schema V2 (14维结构化)
@@ -98,11 +153,21 @@ class TLabelAdapter(BaseAdapter):
             frames.append(frame)
         
         # 构建 TLabelData
+        # 读宽容、写规范：caps 归一化到 13 键，被剔除的旧键存进 episode_info
+        # 以免信息丢失；归一化结果同时缓存给无参 get_capabilities()。
+        episode_info = dict(raw.get("episode", {}) or {})
+        raw_caps = raw.get("capabilities", {}) or {}
+        clean_caps = self._normalize_capabilities(raw_caps, str(file_path))
+        dropped_caps = {k: v for k, v in raw_caps.items() if k not in CAPABILITY_KEYS}
+        if dropped_caps:
+            episode_info["legacy_capabilities"] = dropped_caps
+        self._last_capabilities = dict(clean_caps)
+
         data = TLabelData(
             frames=frames,
             sensor_info=raw.get("sensor", {}),
-            episode_info=raw.get("episode", {}),
-            capabilities=raw.get("capabilities", {}),
+            episode_info=episode_info,
+            capabilities=clean_caps,
             schema_version=raw.get("schema_version", "0.4.0"),
         )
         

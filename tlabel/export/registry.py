@@ -376,7 +376,7 @@ class _JSONExporter(ExporterBase):
             format_id="json",
             format_name="TLabel JSON",
             file_size_bytes=size,
-            stats={"frames": data.num_frames},
+            stats={"num_frames": data.num_frames},
         )
 
 
@@ -402,7 +402,7 @@ class _CSVExporter(ExporterBase):
             format_id="csv",
             format_name="CSV",
             file_size_bytes=size,
-            stats={"frames": data.num_frames},
+            stats={"num_frames": data.num_frames},
         )
 
 
@@ -428,7 +428,7 @@ class _HDF5Exporter(ExporterBase):
             format_id="hdf5",
             format_name="HDF5",
             file_size_bytes=size,
-            stats={"frames": data.num_frames},
+            stats={"num_frames": data.num_frames},
         )
 
 
@@ -562,7 +562,9 @@ class _FTP1Exporter(ExporterBase):
             format_id="ftp1",
             format_name="FTP-1 / MTTS Zarr",
             file_size_bytes=size,
-            stats=stats,
+            # converter 用 time_steps 表示帧数，这里补一个统一键，
+            # 让所有导出器的 stats 都至少能读到 num_frames。
+            stats={**stats, "num_frames": data.num_frames},
             generated_code=code,
         )
 
@@ -645,7 +647,7 @@ class _LeRobotExporter(ExporterBase):
             output_path=str(output_path),
             format_id="lerobot",
             format_name="LeRobot",
-            stats={"frames": data.num_frames},
+            stats={"num_frames": data.num_frames},
             generated_code=code,
         )
 
@@ -713,14 +715,19 @@ class _LeRobotCreateExporter(ExporterBase):
 
         task_name = kwargs.get("task", "task")
         task_description = kwargs.get("task_description", "")
-        fps = kwargs.get("fps", 30)
         adapter_name = kwargs.get("adapter_name", "")
 
+        # episode_index / chunk_id / observation_state_fields 与
+        # create_lerobot_dataset 的同名参数语义一致，必须透传，
+        # 否则多 episode 场景会全部落到 episode_000000.parquet。
         result = tlabeldata_to_lerobot(
             data,
             str(output_path),
             task_name=task_name,
             task_description=task_description,
+            episode_index=kwargs.get("episode_index", 0),
+            chunk_id=kwargs.get("chunk_id", 0),
+            observation_state_fields=kwargs.get("observation_state_fields"),
         )
 
         code = (
@@ -737,11 +744,11 @@ class _LeRobotCreateExporter(ExporterBase):
             format_id="lerobot_create",
             format_name="LeRobot (新建)",
             stats={
-                "frames": data.num_frames,
-                "fps": fps,
-                "adapter": adapter_name,
-                "num_episodes": result.get("num_episodes", 1),
+                "num_frames": result.get("num_frames", data.num_frames),
+                "duration_s": result.get("duration_s", 0.0),
                 "tactile_dim": result.get("tactile_dim", 14),
+                "num_episodes": result.get("num_episodes", 1),
+                "adapter": adapter_name,
             },
             generated_code=code,
         )

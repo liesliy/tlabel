@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from tlabel.core.schema import TLabelSchemaV2, SCHEMA_V2_FIELD_NAMES
-from tlabel.core.capabilities import warn_if_invalid_capabilities
+from tlabel.core.capabilities import (
+    normalize_capabilities,
+    warn_if_invalid_capabilities,
+)
 
 
 def _sv2_scalar(frame: "TLabelFrame", field: str, default: float = 0.0) -> float:
@@ -657,7 +660,9 @@ class TLabelData:
                     "modified_frames": self.modified_count,
                 }
             },
-            "capabilities": self.capabilities,
+            "capabilities": normalize_capabilities(
+                self.capabilities, source="TLabelData.to_dict", warn=False
+            ),
             "frames": [f.to_dict(is_first=(i == 0), is_last=(i == len(self.frames) - 1))
                       for i, f in enumerate(self.frames)],
             "primitive_annotations": [p.to_dict() for p in self.primitive_annotations]

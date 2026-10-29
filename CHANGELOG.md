@@ -4,6 +4,46 @@ All notable changes to the TLabel project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.24.0] - 2026-10-29
+
+> 迁移说明见 [MIGRATION.md](MIGRATION.md) 的 v0.23 → v0.24 一节。
+
+### ⚠️ Breaking Changes
+
+- **`capabilities` 收敛为闭合的 13 键布尔集合**：合法键由 `tlabel/core/capabilities.py` 的 `CAPABILITY_KEYS` 唯一定义（与 `schema/tlabel-schema.json` 同源）。`contact` 必填（S-7.4-1），`compliance_level` 禁止出现（S-7.4-2）。旧 22 键能力字典（`has_image` / `has_force` / `dimensions` / `texture_energy` / `edge_density` / `shear_field_*` 等）不再被任何内置适配器产出。**读路径保持宽容**：旧文件仍可加载，非法键被剔除并原样保留到 `episode_info["legacy_capabilities"]`。
+- **9 个适配器的 `load()` 改走 `extract_schema()`**：`daimon_dataset` / `daimon_dm_tac` / `paxini_dataset` / `paxini_gen3` / `tacquad` / `touchd` / `univtac` / `vtouch` / `ycb_slide` 此前绕过 `extract_schema()` 直接调用 `TLabelSchemaV2.from_tlabel_v1()`，导致 L3 增强全部丢失。**导出文件的帧内容因此变化**：`compliance_level` 不再恒为 `L1`、`slip_velocity` 不再恒为 `null`、`force_vector` 不再 Fy 恒 0。基于旧（错误）输出的下游基线需要重新生成。
+- **`get_capabilities()` 统一为无参**：`TLabelAdapter` 此前要求 `file_path`，破坏了基类契约。文件驱动的能力查询改用新增的 `get_capabilities_for_file(path)`。
+- **`ExporterResult.stats` 键统一为 `num_frames`**：此前 `json`/`csv`/`hdf5`/`lerobot` 用 `frames`、`ftp1` 用 `time_steps`。读 `stats["frames"]` 的代码需要改。
+- **`-f lerobot` 语义显式化**：CLI 的 `lerobot` 一直指"新建数据集"（registry 里叫 `lerobot_create`），现已通过别名映射固定下来；写回已有数据集需显式指定 `-f lerobot_writeback`。旧命令行为不变。
+
+### Added
+
+- **CLI 信息命令增强**：`tlabel list --verbose` 输出每个适配器的类名、模块、默认合规等级、能力明细与非法键警告；`--json` 供脚本消费。`tlabel info <adapter>` 补齐同样信息并支持 `--image-shape`。
+- **`tlabel export` 接入导出器注册表**：`-f` 现支持 8 种格式（`json` / `csv` / `hdf5` / `lerobot` / `lerobot_writeback` / `ftp1` / `rlds` / `ros2`），非法格式会列出可用项。其中 `rlds` 与 `ros2` 为预留导出器，当前为占位实现。新增 `--sensor` / `--areas`（FTP-1）、`--overwrite`（LeRobot 写回）。
+- **批量导出**：`tlabel export <目录> -f <格式> --batch`，递归按适配器支持的扩展名处理，保持子目录结构，单文件失败不中断其余，退出码反映失败数。
+- **`capabilities` 出口归一化与严格模式**：新增 `normalize_capabilities()` / `strict_enabled()`。所有出口（`TLabelData.to_dict()`、LeRobot 导出、HDF5 writer）统一过白名单，保证产物 schema 合法。设 `TLABEL_STRICT_CAPABILITIES=1` 后，不合规数据在出口直接抛 `ValueError` 而非静默修复。
+- **适配器 conformance 守护测试** `tests/unit/conformance/test_capabilities_conformance.py`（78 个用例）：钉死 13 键合规、`contact` 必填、`compliance_level` 禁入、`get_capabilities()` 无参契约、导出产物与 JSON Schema 一致、Python 常量与 schema JSON 同源。
+
+### Fixed
+
+- **LeRobot 写回读不回自己产出的数据集**：`lerobot_create` 产出 LeRobot v2.1 的嵌套布局 `data/chunk-000/episode_000000.parquet`，但 `lerobot_to_tlabel()` / `tlabel_to_lerobot()` 用 `glob("*.parquet")` 只匹配平铺布局，导致 `No parquet files found`。改用 `rglob`，两种布局都能覆盖。
+- **LeRobot 写回破坏 v2.1 目录结构**：写回时把全部 parquet 合并成单个 `data/chunk-0000.parquet` 再 `unlink` 原文件，会压平多 episode、使 `meta/episodes.jsonl` 的分片信息失真。改为记录每个文件的行区间后原地逐文件更新。
+- **批量导出把 0 帧文件当成功**：适配器对无效输入返回 0 帧 `TLabelData` 而不报错，此前会打印成功并产出空文件。现在单文件与批量路径都校验 `num_frames > 0`。
+- **`daimon_dataset` 的无视频降级逻辑作用于已删除的旧键**（`texture_energy` / `edge_density` / `shear_field_*`），是死代码。改为降级 `force_vector` / `slip_velocity` / `object_deformation`。
+- **`paxini_gen3` / `tacquad` 的 `get_capabilities()` 签名违规**：前者带 `file_path` 参数、后者缺返回类型标注，均已修正。
+
+### Documentation
+
+- 新增 `MIGRATION.md` 的 v0.23 → v0.24 章节：13 键规则、旧 22 键的三类去向、旧文件读取行为、帧内容变化清单、CLI 变化、严格模式、适配器自查清单。
+- `docs/tlabel-format.md` §capabilities 补规范性说明（闭合键集、13 键 vs 14 维的区别、声明与输出必须一致、旧文件兼容）。
+- `docs/annotation-spec.md` 补 `capabilities` 契约。
+- `docs/spec/tlabel-spec-v1.md` §11 的 D-13 / D-17 / D-18 标记为已解决。
+
+### Tests
+
+- 479 passed, 1 skipped（此前 383 passed，skip 数不变）。新增 78 个 conformance 测试、13 个 `capabilities` 归一化/严格模式测试、5 个 CLI 导出格式别名测试。
+- 移除 `tests/unit/test_edge_cases.py` 中对 `TypeError` 跳过的豁免分支——适配器签名已统一，该豁免不再需要。
+
 ## [0.23.3] - 2026-10-26
 
 ### Fixed

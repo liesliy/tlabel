@@ -167,16 +167,17 @@ def _validate_json_file(path: Path) -> List[ValidationResult]:
     if "capabilities" in data:
         caps = data["capabilities"]
         if isinstance(caps, dict):
-            # v0.17: 检查 Schema V2 字段
-            found_v2 = sum(1 for d in SCHEMA_V2_DIMENSIONS if caps.get(d, False))
-            # 旧 22 维字段兼容检查
-            found_legacy = sum(1 for d in LEGACY_V2_DIMENSIONS if caps.get(d, False))
-            if found_v2 > 0:
-                results.append(ValidationResult("info",
-                    f"capabilities 声明 {found_v2}/14 维 (Schema V2)"))
-            if found_legacy > 0:
-                results.append(ValidationResult("info",
-                    f"capabilities 旧字段声明 {found_legacy}/22 维 (legacy)"))
+            from tlabel.core.capabilities import CAPABILITY_KEYS, validate_capabilities
+
+            # caps 只认 13 个合法键（compliance_level 是帧级元字段，不算能力）。
+            declared = [k for k in caps if k in CAPABILITY_KEYS and caps[k]]
+            results.append(ValidationResult(
+                "info",
+                f"capabilities 声明 {len(declared)}/{len(CAPABILITY_KEYS)} 个合法能力键",
+            ))
+            # 非法键只报 warning，不改变退出码——旧文件仍要能校验通过。
+            for problem in validate_capabilities(caps):
+                results.append(ValidationResult("warning", problem, "capabilities"))
 
     # 检查 sensor 信息
     if "sensor" not in data:
@@ -430,15 +431,112 @@ def cmd_validate(args):
         return 0
 
 
+def _adapter_detail(adapter_cls, with_image_shape: bool = False) -> dict:
+    """收集单个适配器的详细信息，供 ``list --verbose`` 与 ``info`` 共用。
+
+    实例化可能因为缺少厂商 SDK / 未连接硬件而失败，这在纯软件环境里是正常情况。
+    因此这里把每一步都降级成 None 或错误字符串，绝不因为探测失败中断整个输出。
+    """
+    from tlabel.adapters.base import SensorAdapterBase
+
+    detail = {
+        "class": adapter_cls.__name__,
+        "module": adapter_cls.__module__,
+        "kind": "sensor" if issubclass(adapter_cls, SensorAdapterBase) else "dataset",
+        "description": (adapter_cls.__doc__ or "").strip().split("\n")[0],
+        "default_compliance_level": getattr(adapter_cls, "default_compliance_level", None),
+        "supported_extensions": [],
+        "capabilities": {},
+        "sensor_info": {},
+    }
+
+    try:
+        adapter = adapter_cls()
+    except Exception as exc:
+        detail["instantiable"] = False
+        detail["instantiate_error"] = str(exc)
+        return detail
+
+    detail["instantiable"] = True
+
+    try:
+        detail["supported_extensions"] = list(adapter.supported_extensions)
+    except Exception:
+        pass
+
+    try:
+        detail["capabilities"] = dict(adapter.get_capabilities())
+    except Exception:
+        pass
+
+    try:
+        detail["sensor_info"] = dict(adapter.get_sensor_info())
+    except Exception:
+        pass
+
+    if with_image_shape:
+        try:
+            shape = adapter.detect_image_shape()
+            detail["image_shape"] = list(shape) if shape else None
+        except Exception:
+            detail["image_shape"] = None
+
+    return detail
+
+
+def _print_capabilities_table(caps: dict) -> None:
+    """按 Schema V2 的 14 维顺序打印能力明细。
+
+    顺序固定用 ``SCHEMA_V2_FIELD_NAMES`` 而不是 ``CAPABILITY_KEYS``（后者是 frozenset，
+    迭代顺序不稳定）。``compliance_level`` 是帧级元字段，不属于能力键，会被过滤掉。
+    """
+    from tlabel.core.capabilities import CAPABILITY_KEYS
+
+    ordered = [k for k in SCHEMA_V2_FIELD_NAMES if k in CAPABILITY_KEYS]
+    active = [k for k in ordered if caps.get(k)]
+
+    print(f"  能力明细（{len(active)}/{len(ordered)} 活跃）:")
+    for key in ordered:
+        mark = "✅" if caps.get(key) else "— "
+        print(f"    {mark} {key}")
+
+    unknown = sorted(set(caps) - set(CAPABILITY_KEYS))
+    if unknown:
+        print(f"  ⚠️ 非法能力键（schema 不接受）: {', '.join(unknown)}")
+
+
 def cmd_list(args):
     """执行 list 子命令"""
-    from tlabel.core.registry import list_adapters, list_builtin_adapters, list_external_adapters, _ensure_adapters
-    
+    import json as _json
+
+    from tlabel.core.registry import (
+        list_builtin_adapters,
+        list_external_adapters,
+        _ensure_adapters,
+    )
+
     # 触发懒加载
     _ensure_adapters()
 
     builtin = list_builtin_adapters()
     external = list_external_adapters()
+    verbose = bool(getattr(args, "verbose", False))
+    as_json = bool(getattr(args, "json", False))
+
+    if as_json:
+        payload = []
+        for group, items in (("builtin", builtin), ("external", external)):
+            for name, cls in sorted(items.items()):
+                entry = {"name": name, "group": group}
+                entry.update(_adapter_detail(cls, with_image_shape=verbose))
+                if not verbose:
+                    # 精简模式只给定位信息，能力明细留给 -v
+                    entry.pop("capabilities", None)
+                    entry.pop("sensor_info", None)
+                    entry.pop("description", None)
+                payload.append(entry)
+        print(_json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
 
     print("📦 TLabel 已注册适配器")
     print("=" * 60)
@@ -451,6 +549,15 @@ def cmd_list(args):
             adapter_type = "🔌 传感器" if issubclass(cls, SensorAdapterBase) else "📁 数据集"
             doc = (cls.__doc__ or "").strip().split("\n")[0][:50]
             print(f"  {adapter_type} {name:20s} {doc}")
+            if verbose:
+                detail = _adapter_detail(cls)
+                exts = detail.get("supported_extensions") or []
+                compliance = detail.get("default_compliance_level") or "L1"
+                caps = detail.get("capabilities") or {}
+                print(f"       扩展名: {', '.join(exts) if exts else '(无)'}")
+                print(f"       默认合规: {compliance}   活跃能力: {sum(1 for v in caps.values() if v)} 项")
+                if not detail.get("instantiable", True):
+                    print(f"       ⚠️ 无法实例化: {detail.get('instantiate_error')}")
 
     if external:
         print(f"\n社区适配器 ({len(external)}):")
@@ -461,6 +568,8 @@ def cmd_list(args):
         print("\n社区适配器: 暂无（欢迎贡献！详见 CONTRIBUTING.md）")
 
     print(f"\n总计: {len(builtin) + len(external)} 个适配器")
+    if not verbose:
+        print("提示: `tlabel list -v` 查看扩展名与能力，`tlabel list --json` 供脚本消费")
     return 0
 
 
@@ -475,42 +584,49 @@ def cmd_info(args):
         print("使用 'tlabel list' 查看所有可用适配器")
         return 1
 
-    try:
-        adapter = adapter_cls()
-        info = {
-            "名称": adapter.name,
-            "类型": adapter_cls.__bases__[0].__name__,
-            "支持格式": adapter.supported_extensions,
-        }
-        
-        try:
-            caps = adapter.get_capabilities()
-            # v0.17: 支持 Schema V2 (14维) 和旧 (22维) 两种口径
-            active_v2 = [k for k, v in caps.items() if v and k in SCHEMA_V2_DIMENSIONS]
-            active_legacy = [k for k, v in caps.items() if v and k in LEGACY_V2_DIMENSIONS]
-            if active_v2:
-                info["活跃维度 (Schema V2)"] = f"{len(active_v2)}/14"
-            if active_legacy:
-                info["活跃维度 (legacy)"] = f"{len(active_legacy)}/22"
-        except Exception:
-            pass
+    detail = _adapter_detail(
+        adapter_cls,
+        with_image_shape=bool(getattr(args, "image_shape", False)),
+    )
 
-        try:
-            sensor_info = adapter.get_sensor_info()
-            info["传感器类型"] = sensor_info.get("type", "unknown")
-            info["制造商"] = sensor_info.get("manufacturer", "unknown")
-        except Exception:
-            pass
+    print(f"📋 适配器详情: {args.name}")
+    print("=" * 40)
+    print(f"  名称: {args.name}")
+    print(f"  类名: {detail['class']}")
+    print(f"  模块: {detail['module']}")
+    print(f"  类型: {'🔌 传感器' if detail['kind'] == 'sensor' else '📁 数据集'}")
+    if detail.get("description"):
+        print(f"  描述: {detail['description']}")
+    print(f"  默认合规等级: {detail.get('default_compliance_level') or 'L1'}")
 
-        print(f"📋 适配器详情: {args.name}")
-        print("=" * 40)
-        for k, v in info.items():
-            print(f"  {k}: {v}")
+    exts = detail.get("supported_extensions") or []
+    print(f"  支持格式: {', '.join(exts) if exts else '(无)'}")
 
-    except Exception as e:
-        print(f"⚠️ 无法实例化适配器: {e}")
-        print(f"  类名: {adapter_cls.__name__}")
-        print(f"  模块: {adapter_cls.__module__}")
+    if not detail.get("instantiable", True):
+        print(f"  ⚠️ 无法实例化: {detail.get('instantiate_error')}")
+        print("     （通常表示缺少厂商 SDK 依赖，见 pyproject.toml 的 optional-dependencies）")
+        return 0
+
+    caps = detail.get("capabilities") or {}
+    if caps:
+        active_v2 = [k for k, v in caps.items() if v and k in SCHEMA_V2_DIMENSIONS]
+        active_legacy = [k for k, v in caps.items() if v and k in LEGACY_V2_DIMENSIONS]
+        if active_v2:
+            print(f"  活跃维度 (Schema V2): {len(active_v2)}/14")
+        if active_legacy:
+            print(f"  活跃维度 (legacy): {len(active_legacy)}/22")
+        print()
+        _print_capabilities_table(caps)
+
+    sensor_info = detail.get("sensor_info") or {}
+    if sensor_info:
+        print()
+        print(f"  传感器类型: {sensor_info.get('type', 'unknown')}")
+        print(f"  制造商: {sensor_info.get('manufacturer', 'unknown')}")
+
+    if "image_shape" in detail:
+        shape = detail["image_shape"]
+        print(f"  图像形状: {tuple(shape) if shape else '未检测到'}")
 
     return 0
 
@@ -524,54 +640,255 @@ def cmd_version(args):
 
 
 
+def _resolve_export_format(requested: str) -> str:
+    """把 CLI 的格式名映射到 registry 的 exporter id。
+
+    ``lerobot`` 在 registry 里指"写回已有数据集"，但 CLI 自发布以来
+    ``-f lerobot`` 的语义一直是"新建数据集"，对应 ``lerobot_create``。
+    为保持旧行为不变，这里做别名映射；写回路径改用 ``lerobot_writeback`` 显式触发。
+    """
+    aliases = {
+        "lerobot": "lerobot_create",
+        "lerobot_writeback": "lerobot",
+    }
+    return aliases.get(requested, requested)
+
+
+#: registry id → CLI 展示名。错误提示必须用 CLI 名字，否则用户照着提示
+#: 输入 ``-f lerobot`` 会得到"新建"而不是提示里那个"写回"导出器。
+_CLI_FORMAT_DISPLAY = {
+    "lerobot_create": "lerobot",
+    "lerobot": "lerobot_writeback",
+}
+
+
+def _cli_format_names(registry) -> list:
+    """按 CLI 语义列出可用格式名（不含内部 id，不含别名重复项）。"""
+    names = {_CLI_FORMAT_DISPLAY.get(s.id, s.id) for s in registry.list_formats()}
+    return sorted(names)
+
+
+def _export_kwargs(args, exporter_id: str, task_override=None) -> dict:
+    """按目标导出器组装参数。
+
+    只透传显式暴露的 CLI 选项——导出器对未知 kwargs 是静默忽略的，
+    整包塞 argparse 命名空间会把拼写错误藏起来。
+
+    ``task_override`` 供批量模式使用：单文件导出时 task 来自 ``--task``，
+    批量时若用户没指定，用文件名作为任务名比全部叫 "task" 更有意义。
+    """
+    if exporter_id == "lerobot_create":
+        return {
+            "adapter_name": args.adapter,
+            "task": args.task or task_override or "task",
+            "task_description": args.task_description or "",
+            "episode_index": args.episode_index,
+        }
+
+    if exporter_id == "lerobot":
+        return {"overwrite": bool(getattr(args, "overwrite", False))}
+
+    if exporter_id == "ftp1":
+        kwargs = {}
+        sensor = getattr(args, "sensor", None)
+        if sensor:
+            kwargs["sensor_name"] = sensor
+        areas = getattr(args, "areas", None)
+        if areas:
+            try:
+                kwargs["functional_areas"] = [
+                    int(part) for part in areas.split(",") if part.strip()
+                ]
+            except ValueError as exc:
+                raise ValueError(
+                    f"--areas 需要逗号分隔的整数（如 0,1），收到 {areas!r}"
+                ) from exc
+        return kwargs
+
+    return {}
+
+
+def _cmd_export_batch(args, exporter_id, spec, registry, adapter_cls):
+    """批量导出：递归目录、逐文件导出、失败隔离、汇总成败。
+
+    输出路径保持输入目录的相对结构，后缀由 ``spec.file_ext`` 决定
+    （不再硬编码 lerobot/ftp1 的分支）。``lerobot`` 是写回模式，
+    语义上只能作用于单个已有数据集，批量场景直接拒绝。
+    """
+    from pathlib import Path
+
+    input_dir = Path(args.input)
+    output_dir = Path(args.output)
+
+    if not input_dir.exists():
+        print(f"❌ 输入目录不存在: {input_dir}")
+        return 1
+    if not input_dir.is_dir():
+        print(f"❌ --batch 需要输入目录，收到的是文件: {input_dir}")
+        return 1
+    if exporter_id == "lerobot":
+        print("❌ lerobot（写回）不支持批量：写回必须指定单个已有数据集目录")
+        print("   批量新建数据集请用 -f lerobot")
+        return 1
+
+    try:
+        exts = {e.lower() for e in adapter_cls().supported_extensions}
+    except Exception:
+        exts = set()
+    if not exts:
+        exts = {".json"}
+
+    files = []
+    for ext in sorted(exts):
+        files.extend(input_dir.rglob(f"*{ext}"))
+    files = sorted(set(files))
+
+    if not files:
+        print(f"❌ 目录下没有匹配 {'/'.join(sorted(exts))} 的文件: {input_dir}")
+        return 1
+
+    print(f"📦 批量导出 {spec.name}")
+    print("=" * 60)
+    print(f"  输入目录: {input_dir}")
+    print(f"  输出目录: {output_dir}")
+    print(f"  适配器:   {args.adapter}")
+    print(f"  格式:     {spec.id}")
+    print(f"  文件数:   {len(files)}")
+    print("=" * 60)
+
+    succeeded, failed = [], []
+    for idx, path in enumerate(files, 1):
+        rel = path.relative_to(input_dir)
+        rel_stem = rel.with_suffix("")
+        out_path = output_dir / f"{rel_stem}{spec.file_ext}"
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            adapter = adapter_cls()
+            data = adapter.load(str(path))
+            if data is None:
+                raise ValueError("适配器未能读出数据")
+            if getattr(data, "num_frames", 0) <= 0:
+                raise ValueError("读出的数据为 0 帧，源文件可能不含有效帧")
+            kwargs = _export_kwargs(args, exporter_id, task_override=rel_stem.name)
+            result = registry.export(exporter_id, data, str(out_path), **kwargs)
+            if not result.success:
+                raise RuntimeError(result.error or "导出器返回失败")
+            succeeded.append((rel, out_path))
+            print(f"  [{idx}/{len(files)}] ✅ {rel} → {out_path.name}")
+        except Exception as exc:
+            failed.append((rel, str(exc)))
+            print(f"  [{idx}/{len(files)}] ❌ {rel}: {exc}")
+
+    print("=" * 60)
+    print(f"批量导出完成：成功 {len(succeeded)}，失败 {len(failed)}")
+    if failed:
+        print("失败清单：")
+        for rel, err in failed:
+            print(f"  - {rel}: {err}")
+        return 1
+    return 0
+
+
 def cmd_export(args):
     """执行 export 子命令"""
-    fmt = args.format.lower()
+    from tlabel.core.registry import get_adapter, _ensure_adapters
+    from tlabel.export.registry import get_registry
 
-    if fmt == "lerobot":
-        try:
-            from tlabel.converters.lerobot_export import create_lerobot_dataset
-        except ImportError as e:
-            print(f"❌ LeRobot 导出功能不可用: {e}")
-            print("   请安装 pyarrow: pip install pyarrow")
-            return 1
+    requested = (args.format or "lerobot").lower()
+    exporter_id = _resolve_export_format(requested)
+    registry = get_registry()
 
-        print(f"📦 导出 LeRobot 数据集")
-        print("=" * 60)
-        print(f"  输入:  {args.input}")
-        print(f"  输出:  {args.output}")
-        print(f"  适配器: {args.adapter}")
-        if args.task:
-            print(f"  任务:  {args.task}")
-        print("=" * 60)
-
-        try:
-            stats = create_lerobot_dataset(
-                input_path=args.input,
-                output_path=args.output,
-                adapter_name=args.adapter,
-                task_name=args.task,
-                task_description=args.task_description,
-                episode_index=args.episode_index,
-            )
-        except Exception as e:
-            print(f"❌ 导出失败: {e}")
-            return 1
-
-        print("=" * 60)
-        print(f"✅ 导出成功！")
-        print(f"   帧数:   {stats['num_frames']}")
-        print(f"   时长:   {stats['duration_s']}s")
-        print(f"   触觉维度: {stats['tactile_dim']}")
-        if stats.get('state_dim', 0) > 0:
-            print(f"   状态维度: {stats['state_dim']}")
-        if stats.get('action_dim', 0) > 0:
-            print(f"   动作维度: {stats['action_dim']}")
-        return 0
-    else:
-        print(f"❌ 不支持的导出格式: {fmt}")
-        print(f"   支持的格式: lerobot")
+    spec = next((s for s in registry.list_formats() if s.id == exporter_id), None)
+    if spec is None:
+        available = ", ".join(_cli_format_names(registry))
+        print(f"❌ 不支持的导出格式: {requested}")
+        print(f"   支持的格式: {available}")
         return 1
+
+    _ensure_adapters()
+    adapter_cls = get_adapter(args.adapter)
+    if adapter_cls is None:
+        print(f"❌ 未找到适配器: {args.adapter}")
+        print("使用 'tlabel list' 查看所有可用适配器")
+        return 1
+
+    if getattr(args, "batch", False):
+        return _cmd_export_batch(args, exporter_id, spec, registry, adapter_cls)
+
+    # 写回需要指向一个已存在的 LeRobot 数据集；提前拦下能给出可操作的提示，
+    # 否则会一路走到转换器里报 "No parquet files found"。
+    if exporter_id == "lerobot":
+        target = Path(args.output)
+        if not target.is_dir():
+            print(f"❌ lerobot_writeback 需要指向已存在的 LeRobot 数据集目录")
+            print(f"   目录不存在: {target}")
+            print("   新建数据集请用 -f lerobot")
+            return 1
+        if not any((target / "data").rglob("*.parquet")):
+            print(f"❌ {target} 下没有 data/**/*.parquet，不是有效的 LeRobot 数据集")
+            print("   新建数据集请用 -f lerobot")
+            return 1
+
+    print(f"📦 导出 {spec.name}")
+    print("=" * 60)
+    print(f"  输入:   {args.input}")
+    print(f"  输出:   {args.output}")
+    print(f"  适配器: {args.adapter}")
+    print(f"  格式:   {spec.id}")
+    if args.task:
+        print(f"  任务:   {args.task}")
+    print("=" * 60)
+
+    try:
+        adapter = adapter_cls()
+        data = adapter.load(args.input)
+    except Exception as e:
+        print(f"❌ 加载失败: {e}")
+        return 1
+
+    if data is None:
+        print(f"❌ 适配器 {args.adapter} 未能从 {args.input} 读出数据")
+        return 1
+    if getattr(data, "num_frames", 0) <= 0:
+        print(f"❌ 读出的数据为 0 帧，{args.input} 可能不含有效帧")
+        return 1
+
+    try:
+        kwargs = _export_kwargs(args, exporter_id)
+    except ValueError as e:
+        print(f"❌ 参数错误: {e}")
+        return 1
+
+    try:
+        result = registry.export(exporter_id, data, args.output, **kwargs)
+    except Exception as e:
+        print(f"❌ 导出失败: {e}")
+        return 1
+
+    if not result.success:
+        print(f"❌ 导出失败: {result.error}")
+        return 1
+
+    print("=" * 60)
+    print(f"✅ 导出成功！")
+    print(f"   输出:   {result.output_path}")
+
+    stats = result.stats or {}
+    num_frames = stats.get("num_frames") or stats.get("frames")
+    if num_frames:
+        print(f"   帧数:   {num_frames}")
+    if stats.get("duration_s"):
+        print(f"   时长:   {stats['duration_s']}s")
+    if stats.get("tactile_dim"):
+        print(f"   触觉维度: {stats['tactile_dim']}")
+    if stats.get("state_dim"):
+        print(f"   状态维度: {stats['state_dim']}")
+    if stats.get("action_dim"):
+        print(f"   动作维度: {stats['action_dim']}")
+    if result.file_size_bytes:
+        print(f"   产物大小: {result.file_size_bytes / 1024:.1f} KB")
+
+    return 0
 
 
 def cmd_template_list(args):
@@ -655,23 +972,41 @@ def main():
 
     # list
     p_list = subparsers.add_parser("list", help="列出所有已注册的适配器")
+    p_list.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="展示扩展名、默认合规等级与活跃能力数",
+    )
+    p_list.add_argument(
+        "--json", action="store_true",
+        help="以 JSON 输出（供脚本消费）",
+    )
     p_list.set_defaults(func=cmd_list)
 
     # info
     p_info = subparsers.add_parser("info", help="查看适配器详细信息")
     p_info.add_argument("name", help="适配器名称")
+    p_info.add_argument(
+        "--image-shape", action="store_true",
+        help="探测传感器图像形状（需要实例化，可能较慢）",
+    )
     p_info.set_defaults(func=cmd_info)
 
     # version
     p_version = subparsers.add_parser("version", help="显示版本号")
     p_version.set_defaults(func=cmd_version)
     # export
-    p_export = subparsers.add_parser("export", help="导出数据为其他格式（LeRobot 等）")
+    p_export = subparsers.add_parser(
+        "export",
+        help="导出数据为其他格式（lerobot / lerobot_create / ftp1 / json / csv / hdf5）",
+    )
     p_export.add_argument("input", help="输入数据文件路径")
-    p_export.add_argument("output", help="输出目录路径")
+    p_export.add_argument("output", help="输出目录或文件路径")
     p_export.add_argument(
         "--format", "-f", default="lerobot",
-        help="导出格式（默认: lerobot）",
+        help=(
+            "导出格式（默认 lerobot，等价于 lerobot_create 新建数据集；"
+            "写回已有数据集用 lerobot_writeback；FTP-1 用 ftp1）"
+        ),
     )
     p_export.add_argument(
         "--adapter", "-a", required=True,
@@ -688,6 +1023,25 @@ def main():
     p_export.add_argument(
         "--episode-index", type=int, default=0,
         help="Episode 编号（默认 0）",
+    )
+    p_export.add_argument(
+        "--sensor", default=None,
+        help="FTP-1 专用：传感器型号（如 GelSightMini），默认取导出器预设",
+    )
+    p_export.add_argument(
+        "--areas", default=None,
+        help="FTP-1 专用：手部功能区，逗号分隔（如 0,1）",
+    )
+    p_export.add_argument(
+        "--overwrite", action="store_true",
+        help="lerobot_writeback 专用：允许覆盖已有数据集",
+    )
+    p_export.add_argument(
+        "--batch", action="store_true",
+        help=(
+            "批量模式：INPUT 视为目录，按适配器支持的扩展名递归收集文件，"
+            "OUTPUT 视为输出目录并保持相对结构；单个文件失败不中断"
+        ),
     )
     p_export.set_defaults(func=cmd_export)
 

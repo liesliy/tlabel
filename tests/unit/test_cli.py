@@ -144,3 +144,46 @@ class TestCLICommands:
             name = "nonexistent_sensor_xyz"
         result = cmd_info(Args())
         assert result == 1
+
+
+class TestExportFormatAliases:
+    """CLI 格式名与 registry exporter id 的映射契约。
+
+    背景：registry 里的 ``lerobot`` 指"写回"，但 CLI 自发布以来 ``-f lerobot``
+    一直是"新建"。两者必须显式区分，且错误提示只能展示 CLI 名字——否则用户
+    照着提示输入 ``-f lerobot`` 会得到和提示暗示相反的行为。
+    """
+
+    def test_lerobot_maps_to_create(self):
+        from tlabel.cli import _resolve_export_format
+        assert _resolve_export_format("lerobot") == "lerobot_create"
+
+    def test_lerobot_writeback_maps_to_registry_lerobot(self):
+        from tlabel.cli import _resolve_export_format
+        assert _resolve_export_format("lerobot_writeback") == "lerobot"
+
+    def test_other_formats_pass_through(self):
+        from tlabel.cli import _resolve_export_format
+        for fmt in ("json", "csv", "hdf5", "ftp1", "rlds", "ros2"):
+            assert _resolve_export_format(fmt) == fmt
+
+    def test_error_hint_uses_cli_names_not_internal_ids(self):
+        from tlabel.cli import _cli_format_names
+        from tlabel.export.registry import get_registry
+
+        names = _cli_format_names(get_registry())
+        # 内部 id 不得泄漏到提示里
+        assert "lerobot_create" not in names
+        # 写回必须以 CLI 名字出现，否则用户无从发现
+        assert "lerobot_writeback" in names
+        assert "lerobot" in names
+        # 别名不得造成重复项
+        assert len(names) == len(set(names))
+
+    def test_error_hint_is_sorted_and_complete(self):
+        from tlabel.cli import _cli_format_names
+        from tlabel.export.registry import get_registry
+
+        names = _cli_format_names(get_registry())
+        assert names == sorted(names)
+        assert {"json", "csv", "hdf5", "lerobot", "lerobot_writeback"} <= set(names)

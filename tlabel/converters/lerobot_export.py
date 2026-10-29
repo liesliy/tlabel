@@ -40,6 +40,7 @@ except ImportError:
 from tlabel.core.types import TLabelData, TLabelFrame
 from tlabel.core.schema import TLabelSchemaV2, SCHEMA_V2_FIELD_NAMES
 from tlabel.converters._encoding import encode_schema_v2
+from tlabel.core.capabilities import normalize_capabilities
 
 
 # ================================================================
@@ -251,7 +252,9 @@ def _generate_info_json(
         "data_path": "data/chunk-000/episode_000000.parquet",
         "source_adapter": data.sensor_info.get("adapter", data.episode_info.get("source_adapter", "")),
         "sensor_info": data.sensor_info,
-        "capabilities": data.capabilities,
+        "capabilities": normalize_capabilities(
+            data.capabilities, source="lerobot_export", warn=False
+        ),
     }
 
     return info

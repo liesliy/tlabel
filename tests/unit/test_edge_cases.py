@@ -491,12 +491,6 @@ class TestCapabilitiesCompleteness:
                 caps = instance.get_capabilities()
                 assert isinstance(caps, dict), f"{name}: capabilities 不是 dict"
                 assert len(caps) > 0, f"{name}: capabilities 为空 dict"
-            except TypeError as e:
-                # 部分适配器的 get_capabilities() 需要参数（如 TLabelAdapter 需要 file_path），
-                # 这类适配器在无参调用时会报 TypeError，此处跳过不算失败
-                if "missing" in str(e) or "required positional" in str(e) or "takes" in str(e):
-                    continue
-                missing.append(f"{name}: {e}")
             except Exception as e:
                 missing.append(f"{name}: {e}")
 
@@ -550,19 +544,22 @@ class TestCapabilitiesCompleteness:
         注：检查范围限定为 contact 和 slip_event 这两个大多数适配器
         都能提供的核心能力字段。confidence 和 compliance_level 属于
         Schema 元字段而非传感器能力，不在 capabilities 中声明。
+
+        文件驱动型适配器（实现 get_capabilities_for_file，如 TLabelAdapter）
+        无数据源时只能给保守空声明，只要求含 contact。
         """
         adapters = list_builtin_adapters()
         insufficient = []
         for name, cls in adapters.items():
             try:
                 instance = cls()
-                try:
-                    caps = instance.get_capabilities()
-                except TypeError:
-                    # 部分适配器 get_capabilities 需要参数，跳过键数检查
-                    continue
-                # 至少应包含 contact 和 slip_event 这两个核心字段
-                required_min = {"contact", "slip_event"}
+                caps = instance.get_capabilities()
+                # 文件驱动型：能力由具体文件决定，无参时仅保证 contact
+                required_min = (
+                    {"contact"}
+                    if hasattr(instance, "get_capabilities_for_file")
+                    else {"contact", "slip_event"}
+                )
                 missing = required_min - set(caps.keys())
                 if missing:
                     insufficient.append(f"{name}: missing {missing}")

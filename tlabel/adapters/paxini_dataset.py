@@ -100,25 +100,27 @@ class PaxiniAdapter(BaseAdapter):
         )
 
     def get_capabilities(self) -> Dict[str, bool]:
+        """13 个合法能力键（Schema V2，规范 S-7.4-1）。
+
+        判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
+        理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
+        帕西尼压力阵列数据集。压力阵列无法测 3D 力方向；object_deformation
+        实为压力均值代理量，不是物理形变。
+        """
         return {
-            "contact": True, "deformation_magnitude": True,
-            "force_magnitude": True, "force_peak": True,
-            "force_direction": False,  # PaXini只有法向力
-            "slip_entropy": True, "slip_event": True,
-            "texture_energy": False,   # 非视觉传感器
-            "edge_density": False,     # 非视觉传感器
-            "contact_area": True, "centroid_x": True,
-            "normal_field_magnitude": True, "normal_field_variance": True,
-            "shear_field_magnitude": False,
-            "shear_field_direction": False,
-            "delta_force_normal": True,
-            "delta_force_shear": False,
-            "friction_cone_ratio": False,
-            # --- 时序4维: 只有后2维 ---
-            "optical_flow_magnitude": False,  # 无视频流
-            "optical_flow_direction": False,   # 无视频流
-            "temporal_deformation_rate": True,
-            "contact_transition": True,
+            "contact": True,
+            "contact_centroid": True,
+            "contact_region": False,
+            "force_magnitude": True,  # 由压力阵列均值映射，非标定牛顿值
+            "force_vector": False,
+            "torque_vector": False,
+            "slip_event": True,  # 真实滑移检测（质心偏移 + 力变化率）
+            "slip_velocity": False,
+            "manipulation_phase": True,
+            "texture_class": False,
+            "object_deformation": True,  # pressure proxy, not physical deformation
+            "temperature": False,
+            "confidence": True,
         }
 
     def get_sensor_info(self) -> Dict[str, Any]:
@@ -238,7 +240,15 @@ class PaxiniAdapter(BaseAdapter):
             frame = TLabelFrame(
                 frame_idx=fi,
                 timestamp_s=round(float(timestamps[fi]) / 1000.0, 4),
-                schema_v2=TLabelSchemaV2.from_tlabel_v1(tlabel_v2),
+                # 走 extract_schema 而不是裸 from_tlabel_v1：load 手上已有
+                # extract_schema 需要的全部原始输入，绕过去只会丢掉增强。
+                schema_v2=self.extract_schema({
+                    "contacts": all_contacts,
+                    "slip_detected": slip_detected,
+                    "prev_contacts": prev_contacts,
+                    "prev_tlabel_v2": prev_tlabel_v2,
+                    "dt": dt,
+                }),
                 manipulation_phase=phase,
                 confidence=confidence,
                 sensor_specific=sensor_specific,

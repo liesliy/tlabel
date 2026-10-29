@@ -311,23 +311,27 @@ class GelSightAdapter(BaseAdapter):
         )
 
     def get_capabilities(self) -> Dict[str, bool]:
+        """13 个合法能力键（Schema V2，规范 S-7.4-1）。
+
+        判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
+        理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
+        视觉触觉（GelSight / DIGIT）。force_magnitude 是形变代理量、非 SI 标定值；
+        force_vector 仅在 pkl 携带 force_vector_N 时产出，属条件能力。
+        """
         return {
-            "contact": True, "deformation_magnitude": True,
-            "force_magnitude": True, "force_peak": True,
-            "deformation_magnitude_peak": True,  # v0.7
-            "force_direction": True, "slip_entropy": True,
-            "slip_event": True, "texture_energy": True,
-            "edge_density": True, "contact_area": True,
-            "centroid_x": True,
-            "normal_field_magnitude": True, "normal_field_variance": True,
-            "shear_field_magnitude": True, "shear_field_direction": True,
-            "delta_force_normal": True, "delta_force_shear": True,
-            "friction_cone_ratio": True,
-            # --- 时序4维 ---
-            "optical_flow_magnitude": True,
-            "optical_flow_direction": True,
-            "temporal_deformation_rate": True,
-            "contact_transition": True,
+            "contact": True,
+            "contact_centroid": True,
+            "contact_region": False,
+            "force_magnitude": True,  # 视觉形变代理，非标定牛顿值
+            "force_vector": True,  # 条件：pkl 含 force_vector_N 时产出 3D 力
+            "torque_vector": False,
+            "slip_event": True,  # 图像梯度角方差代理，非物理滑移检测
+            "slip_velocity": False,
+            "manipulation_phase": True,
+            "texture_class": False,
+            "object_deformation": True,  # 由 deformation_magnitude 映射
+            "temperature": False,
+            "confidence": True,
         }
 
     def get_sensor_info(self) -> Dict[str, Any]:

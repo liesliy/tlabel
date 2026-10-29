@@ -49,15 +49,18 @@ def lerobot_to_tlabel(
         meta = json.load(f)
     
     # 2. 读取 Parquet 文件
+    # LeRobot v2.1 标准是 data/chunk-XXX/episode_XXXXXX.parquet（嵌套），
+    # 早期版本和部分第三方数据集是 data/*.parquet（平铺）。rglob 两种都能覆盖，
+    # 路径补零后按字符串排序即等价于按 (chunk_id, episode_index) 数值排序。
     data_dir = path / "data"
-    parquet_files = sorted(data_dir.glob("*.parquet"))
+    parquet_files = sorted(data_dir.rglob("*.parquet"))
     if not parquet_files:
         raise FileNotFoundError(f"No parquet files found in {data_dir}")
     
     tables = [pq.read_table(pf) for pf in parquet_files]
     table = pa.concat_tables(tables)
     df = table.to_pandas()
-    
+
     # 3. 提取触觉字段
     if tactile_field not in df.columns:
         available = [c for c in df.columns if "tactile" in c.lower() or "force" in c.lower()]
@@ -167,14 +170,24 @@ def tlabel_to_lerobot(
         raise ValueError("TLabel JSON has no frames")
 
     # 2. 读取现有 Parquet
+    # 同 lerobot_to_tlabel：v2.1 是嵌套 chunk 目录，旧格式是平铺，用 rglob 兼容两者。
     data_dir = lerobot_path / "data"
-    parquet_files = sorted(data_dir.glob("*.parquet"))
+    parquet_files = sorted(data_dir.rglob("*.parquet"))
     if not parquet_files:
         raise FileNotFoundError(f"No parquet files found in {data_dir}")
 
     tables = [pq.read_table(pf) for pf in parquet_files]
     table = pa.concat_tables(tables)
     df = table.to_pandas()
+
+    # 记录每个 parquet 文件在全局 df 中的行区间，写回时按区间原地更新，
+    # 保证 chunk/episode 目录结构和 meta/episodes.jsonl 的分片信息不被破坏。
+    file_bounds = []
+    cursor = 0
+    for pf, tbl in zip(parquet_files, tables):
+        n = tbl.num_rows
+        file_bounds.append((pf, cursor, cursor + n))
+        cursor += n
 
     # 3. 验证帧数匹配
     if len(df) != len(frames):
@@ -208,14 +221,12 @@ def tlabel_to_lerobot(
 
     df[tactile_field] = list(tactile_array)
 
-    # 6. 写回 Parquet
-    output_parquet = data_dir / "chunk-0000.parquet"
-    new_table = pa.Table.from_pandas(df)
-    pq.write_table(new_table, output_parquet)
-
-    for pf in parquet_files:
-        if pf != output_parquet:
-            pf.unlink()
+    # 6. 写回 Parquet（原地逐文件更新，不改变 chunk/episode 结构）
+    for pf, start, end in file_bounds:
+        chunk = df.iloc[start:end]
+        new_table = pa.Table.from_pandas(chunk, preserve_index=False)
+        pq.write_table(new_table, pf)
+    output_parquet = parquet_files[0]
 
     # 7. 更新 meta/info.json
     info_path = lerobot_path / "meta" / "info.json"
@@ -251,7 +262,10 @@ def tlabel_to_lerobot(
     with open(info_path, "w") as f:
         json.dump(meta, f, indent=2)
 
-    print(f"[OK] Tactile annotations written to {output_parquet}")
+    print(
+        f"[OK] Tactile annotations written to {len(file_bounds)} parquet file(s) "
+        f"under {data_dir} ({len(df)} frames total)"
+    )
     if image_shape is not None:
         print(f"[OK] Tactile image shape detected: {image_shape}")
     print(f"[OK] Updated meta/info.json with '{tactile_field}' schema")

@@ -16,8 +16,9 @@ v0.23.3 起本模块是这些常量的唯一 Python 事实源，测试与校验�
 不要在别处重复手写键名列表。
 """
 
+import os
 import warnings
-from typing import Dict, Iterable, List, Mapping
+from typing import Dict, Iterable, List, Mapping, Optional
 
 # ================================================================
 # 常量
@@ -107,12 +108,87 @@ def capabilities_subset(keys: Iterable[str]) -> Dict[str, bool]:
     return {k: True for k in keys if k in CAPABILITY_KEYS}
 
 
+# ================================================================
+# 出口归一化
+# ================================================================
+
+#: 开启严格模式的环境变量名。设为 1/true/yes/on 后，出口遇到不合规
+#: capabilities 直接抛 ValueError 而不是告警。
+STRICT_ENV_VAR = "TLABEL_STRICT_CAPABILITIES"
+
+
+def strict_enabled(strict: Optional[bool] = None) -> bool:
+    """判断是否启用严格模式；``strict`` 显式传入时优先于环境变量。"""
+    if strict is not None:
+        return bool(strict)
+    return os.environ.get(STRICT_ENV_VAR, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def normalize_capabilities(
+    capabilities: Mapping,
+    source: str = "",
+    *,
+    strict: Optional[bool] = None,
+    warn: bool = True,
+) -> Dict[str, bool]:
+    """出口归一化：把任意 capabilities 收敛成 schema 合法字典。
+
+    做三件事：白名单剔除非法键、值强制转 bool、缺失的必填 ``contact`` 补 False。
+
+    - 严格模式（``strict=True`` 或环境变量 ``TLABEL_STRICT_CAPABILITIES``）：
+      发现非法键或缺失必填键时抛 ``ValueError``，不做静默修复。
+    - 非严格模式（默认）：修复并告警，保证旧文件仍能读写。
+
+    返回值总是 13 键集合的合法子集。
+    """
+    if not isinstance(capabilities, Mapping):
+        if strict_enabled(strict):
+            raise ValueError(
+                f"capabilities 必须是 mapping，实际为 {type(capabilities).__name__}"
+                + (f"（来源：{source}）" if source else "")
+            )
+        if warn:
+            warnings.warn(
+                f"[tlabel] capabilities 不是 mapping（{source or '未知来源'}），"
+                f"已按空声明处理",
+                UserWarning,
+                stacklevel=3,
+            )
+        return {"contact": False}
+
+    problems = validate_capabilities(capabilities)
+    if problems and strict_enabled(strict):
+        prefix = f"[tlabel] capabilities 不合规（{source}）：" if source \
+            else "[tlabel] capabilities 不合规："
+        raise ValueError(prefix + "；".join(problems))
+
+    cleaned = filter_capabilities(capabilities)
+    for key in REQUIRED_CAPABILITY_KEYS:
+        cleaned.setdefault(key, False)
+
+    # 只在真的剔除了键时才告警，避免与构造期告警重复刷屏
+    dropped = sorted(set(capabilities) - CAPABILITY_KEYS)
+    if dropped and warn:
+        prefix = f"[tlabel] capabilities 含 {len(dropped)} 个非法键（{source}）" \
+            if source else f"[tlabel] capabilities 含 {len(dropped)} 个非法键"
+        warnings.warn(
+            prefix + "，已在输出中剔除：" + ", ".join(dropped),
+            UserWarning,
+            stacklevel=3,
+        )
+
+    return cleaned
+
+
 __all__ = [
     "CAPABILITY_KEYS",
     "REQUIRED_CAPABILITY_KEYS",
     "FORBIDDEN_CAPABILITY_KEYS",
+    "STRICT_ENV_VAR",
     "validate_capabilities",
     "filter_capabilities",
     "warn_if_invalid_capabilities",
     "capabilities_subset",
+    "normalize_capabilities",
+    "strict_enabled",
 ]

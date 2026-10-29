@@ -28,6 +28,13 @@ Raw Sensor Data → Preprocessing → Dimension-wise Annotation → Compliance L
 3. **Compliance Level Assignment**: Adapter determines L1–L4 based on sensor physical capability
 4. **Capability Filtering**: Only dimensions declared in `capabilities` are included in the output
 
+The `capabilities` object is a **closed set of exactly 13 boolean keys** (S-7.4-1).
+`compliance_level` is frame-level metadata and is **not** a capability key — it must
+not appear in `capabilities` (S-7.4-2). `contact` is required. Annotators must not
+declare a dimension `true` unless the emitted frames actually carry a non-null value
+for it (S-6.3-3); the declaration is a statement about file content, not hardware
+potential.
+
 ## Annotation Methods by Dimension
 
 ### 1. Contact Detection (Required)

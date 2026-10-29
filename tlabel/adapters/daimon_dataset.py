@@ -882,29 +882,27 @@ class DaimonAdapter(BaseAdapter):
         return [".parquet"]
 
     def get_capabilities(self) -> Dict[str, bool]:
+        """13 个合法能力键（Schema V2，规范 S-7.4-1）。
+
+        判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
+        理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
+        戴盟视觉触觉数据集。force_vector / slip_velocity 均为条件能力：
+        仅在数据带 shear 视频 / optical flow 时产出。
+        """
         return {
             "contact": True,
-            "deformation_magnitude": True,
-            "force_magnitude": True,
-            "force_peak": True,
-            "force_direction": True,
-            "slip_entropy": True,
+            "contact_centroid": True,
+            "contact_region": False,
+            "force_magnitude": True,  # 由形变视频估算，非标定牛顿值
+            "force_vector": True,  # 条件：有 shear 视频时合成 [Fx,Fy,Fz]
+            "torque_vector": False,
             "slip_event": True,
-            "texture_energy": True,   # 从deformation视频算
-            "edge_density": True,     # 从deformation视频算
-            "contact_area": True,
-            "centroid_x": True,
-            "normal_field_magnitude": True,
-            "normal_field_variance": True,
-            "shear_field_magnitude": True,  # 从shear视频算
-            "shear_field_direction": True,  # 从shear视频算
-            "delta_force_normal": True,
-            "delta_force_shear": True,
-            "friction_cone_ratio": True,
-            "optical_flow_magnitude": True,   # 从deformation视频算
-            "optical_flow_direction": True,   # 从deformation视频算
-            "temporal_deformation_rate": True,
-            "contact_transition": True,
+            "slip_velocity": True,  # 条件：有 optical flow 时换算滑移速度
+            "manipulation_phase": True,
+            "texture_class": False,
+            "object_deformation": True,  # 由 deformation_magnitude 映射
+            "temperature": False,
+            "confidence": True,
         }
 
     def get_sensor_info(self) -> Dict[str, Any]:
@@ -1227,7 +1225,9 @@ class DaimonAdapter(BaseAdapter):
             frame = TLabelFrame(
                 frame_idx=int(frame_indices[i]),
                 timestamp_s=round(float(timestamps[i]) if timestamps is not None else i / fps, 4),
-                schema_v2=TLabelSchemaV2.from_tlabel_v1(tlabel_v2),
+                # 走 extract_schema 而不是裸 from_tlabel_v1：后者会丢掉
+                # shear 合成 force_vector、slip_velocity 和 compliance_level 增强。
+                schema_v2=self.extract_schema(tlabel_v2),
                 manipulation_phase="idle",
                 confidence=confidence,
                 sensor_specific=sensor_specific,
@@ -1269,14 +1269,12 @@ class DaimonAdapter(BaseAdapter):
         }
 
         caps = self.get_capabilities()
-        # 无视频时部分维度降级
+        # 无视频时部分维度降级：force_vector 依赖 shear 视频合成，
+        # slip_velocity 依赖 optical flow，object_deformation 依赖形变视频。
         if not video_available:
-            caps["texture_energy"] = False
-            caps["edge_density"] = False
-            caps["shear_field_magnitude"] = False
-            caps["shear_field_direction"] = False
-            caps["optical_flow_magnitude"] = False
-            caps["optical_flow_direction"] = False
+            caps["force_vector"] = False
+            caps["slip_velocity"] = False
+            caps["object_deformation"] = False
 
         return TLabelData(
             frames=tlabel_frames,

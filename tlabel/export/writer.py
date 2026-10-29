@@ -14,6 +14,7 @@ from typing import Optional
 
 from tlabel.core.types import TLabelData
 from tlabel.core.schema import SCHEMA_V2_FIELD_NAMES, TLabelSchemaV2
+from tlabel.core.capabilities import normalize_capabilities
 
 
 # Schema V2 展开列（向量展开为多列）
@@ -293,7 +294,9 @@ def _export_hdf5(data: TLabelData, output_path: str):
         episode_info_json = json.dumps(data.episode_info)
         meta_group.attrs["episode_info"] = episode_info_json
         
-        capabilities_json = json.dumps(data.capabilities)
+        capabilities_json = json.dumps(
+            normalize_capabilities(data.capabilities, source="hdf5_writer", warn=False)
+        )
         meta_group.attrs["capabilities"] = capabilities_json
         
         if data.calibration_params:

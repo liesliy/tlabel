@@ -418,21 +418,27 @@ class ToucHDAdapter(BaseAdapter):
         return [".json"]
 
     def get_capabilities(self) -> Dict[str, bool]:
+        """13 个合法能力键（Schema V2，规范 S-7.4-1）。
+
+        判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
+        理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
+        ToucHD（唯一带真实 3D 力 ground truth 的数据集）。force_vector 直接取
+        传感器真值；slip_velocity 为条件能力。
+        """
         return {
-            "contact": True, "deformation_magnitude": True,
-            "force_magnitude": True, "force_peak": True,
-            "force_direction": True, "slip_entropy": True,
-            "slip_event": True, "texture_energy": True,
-            "edge_density": True, "contact_area": True,
-            "centroid_x": True,
-            "normal_field_magnitude": True, "normal_field_variance": True,
-            "shear_field_magnitude": True, "shear_field_direction": True,
-            "delta_force_normal": True, "delta_force_shear": True,
-            "friction_cone_ratio": True,
-            "optical_flow_magnitude": True,
-            "optical_flow_direction": True,
-            "temporal_deformation_rate": True,
-            "contact_transition": True,
+            "contact": True,
+            "contact_centroid": True,
+            "contact_region": False,
+            "force_magnitude": True,  # norm(force_vector)，来自 3D 力真值
+            "force_vector": True,  # 传感器 3D 力 ground truth
+            "torque_vector": False,
+            "slip_event": True,
+            "slip_velocity": True,  # 条件：有 optical flow 时换算
+            "manipulation_phase": True,
+            "texture_class": False,
+            "object_deformation": True,  # 由 deformation_magnitude 映射
+            "temperature": False,
+            "confidence": True,
         }
 
     def get_sensor_info(self) -> Dict[str, Any]:
@@ -787,7 +793,10 @@ class ToucHDAdapter(BaseAdapter):
                     frame = TLabelFrame(
                         frame_idx=total_force_samples,
                         timestamp_s=round(total_force_samples / 30.0, 4),
-                        schema_v2=TLabelSchemaV2.from_tlabel_v1(tlabel_v2),
+                        # 走 extract_schema 而不是裸 from_tlabel_v1：ToucHD 是唯一
+                        # 带真实 3D 力 ground truth 的数据集，裸 from_tlabel_v1 会把
+                        # force_vector 合成成 Fy=0 的假值并丢掉 L3 增强。
+                        schema_v2=self.extract_schema(tlabel_v2),
                         manipulation_phase=phase,
                         confidence=confidence,
                         sensor_specific=sensor_specific,

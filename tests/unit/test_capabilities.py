@@ -18,8 +18,11 @@ from tlabel.core.capabilities import (
     CAPABILITY_KEYS,
     FORBIDDEN_CAPABILITY_KEYS,
     REQUIRED_CAPABILITY_KEYS,
+    STRICT_ENV_VAR,
     capabilities_subset,
     filter_capabilities,
+    normalize_capabilities,
+    strict_enabled,
     validate_capabilities,
     warn_if_invalid_capabilities,
 )
@@ -207,3 +210,98 @@ class TestDirtySourcesCleaned:
 
         assert "some_random_feature" not in data.capabilities
         assert set(data.capabilities) <= CAPABILITY_KEYS
+
+
+# ================================================================
+# 出口归一化与严格模式（S3）
+# ================================================================
+
+class TestNormalizeCapabilities:
+    """出口归一化：剔除非法键、补必填键、严格模式抛错。"""
+
+    def test_drops_illegal_keys_and_warns(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            out = normalize_capabilities(
+                {"contact": True, "has_image": True, "dimensions": 22},
+                source="test",
+            )
+        assert out == {"contact": True}
+        assert any("非法键" in str(w.message) for w in caught)
+
+    def test_adds_missing_contact(self):
+        assert normalize_capabilities({"force_magnitude": True}) == {
+            "force_magnitude": True,
+            "contact": False,
+        }
+
+    def test_returns_legal_subset_always(self):
+        out = normalize_capabilities(
+            {"compliance_level": "L2", "bogus": 1, "contact": True, "slip_event": True}
+        )
+        assert set(out) <= CAPABILITY_KEYS
+        assert "compliance_level" not in out
+
+    def test_non_mapping_degrades_to_empty_declaration(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            assert normalize_capabilities(None) == {"contact": False}
+
+    def test_legal_input_is_unchanged_in_strict_mode(self):
+        caps = {"contact": True, "force_magnitude": False}
+        assert normalize_capabilities(caps, strict=True) == caps
+
+    def test_strict_raises_on_illegal_key(self):
+        with pytest.raises(ValueError, match="非法能力键"):
+            normalize_capabilities({"has_image": True}, source="test", strict=True)
+
+    def test_strict_raises_on_missing_contact(self):
+        with pytest.raises(ValueError, match="缺少必填能力键"):
+            normalize_capabilities({"force_magnitude": True}, strict=True)
+
+    def test_strict_raises_on_non_bool_value(self):
+        with pytest.raises(ValueError, match="必须是 bool"):
+            normalize_capabilities({"contact": "yes"}, strict=True)
+
+    def test_strict_via_environment_variable(self, monkeypatch):
+        monkeypatch.setenv(STRICT_ENV_VAR, "1")
+        assert strict_enabled() is True
+        with pytest.raises(ValueError):
+            normalize_capabilities({"has_image": True})
+
+    def test_strict_off_by_default(self, monkeypatch):
+        monkeypatch.delenv(STRICT_ENV_VAR, raising=False)
+        assert strict_enabled() is False
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            assert normalize_capabilities({"has_image": True}) == {"contact": False}
+
+    def test_explicit_strict_overrides_environment(self, monkeypatch):
+        monkeypatch.setenv(STRICT_ENV_VAR, "0")
+        with pytest.raises(ValueError):
+            normalize_capabilities({"has_image": True}, strict=True)
+
+
+class TestExitsNormalize:
+    """所有出口都必须产出合法 capabilities，旧数据不得泄漏非法键。"""
+
+    def _dirty_data(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return TLabelData(
+                frames=[],
+                sensor_info={"type": "test"},
+                episode_info={},
+                capabilities={"has_image": True, "dimensions": 22, "contact": True},
+            )
+
+    def test_to_dict_outputs_legal_capabilities(self):
+        payload = self._dirty_data().to_dict()
+        assert set(payload["capabilities"]) <= CAPABILITY_KEYS
+        assert payload["capabilities"]["contact"] is True
+        assert "has_image" not in payload["capabilities"]
+
+    def test_to_dict_keeps_original_capabilities_attribute(self):
+        """出口归一化不得篡改对象本身，避免影响后续逻辑。"""
+        data = self._dirty_data()
+        assert "has_image" in data.capabilities

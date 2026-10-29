@@ -360,21 +360,26 @@ class VTouchAdapter(BaseAdapter):
         return [".h5", ".hdf5"]
 
     def get_capabilities(self) -> Dict[str, bool]:
+        """13 个合法能力键（Schema V2，规范 S-7.4-1）。
+
+        判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
+        理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
+        VTouch（L2）。无力矢量数据；slip_velocity 由 optical flow 换算。
+        """
         return {
-            "contact": True, "deformation_magnitude": True,
-            "force_magnitude": True, "force_peak": True,
-            "force_direction": True, "slip_entropy": True,
-            "slip_event": True, "texture_energy": True,
-            "edge_density": True, "contact_area": True,
-            "centroid_x": True,
-            "normal_field_magnitude": True, "normal_field_variance": True,
-            "shear_field_magnitude": True, "shear_field_direction": True,
-            "delta_force_normal": True, "delta_force_shear": True,
-            "friction_cone_ratio": True,
-            "optical_flow_magnitude": True,
-            "optical_flow_direction": True,
-            "temporal_deformation_rate": True,
-            "contact_transition": True,
+            "contact": True,
+            "contact_centroid": True,
+            "contact_region": False,
+            "force_magnitude": True,  # GelSight 风格形变估算，非标定牛顿值
+            "force_vector": False,
+            "torque_vector": False,
+            "slip_event": True,
+            "slip_velocity": True,  # 条件：slip_event 为真时由 optical flow 换算
+            "manipulation_phase": True,
+            "texture_class": False,
+            "object_deformation": True,  # 由 deformation_magnitude 映射
+            "temperature": False,
+            "confidence": True,
         }
 
     def get_sensor_info(self) -> Dict[str, Any]:
@@ -693,7 +698,9 @@ class VTouchAdapter(BaseAdapter):
             frame = TLabelFrame(
                 frame_idx=i,
                 timestamp_s=round(i * dt, 4),
-                schema_v2=TLabelSchemaV2.from_tlabel_v1(tlabel_v2),
+                # 走 extract_schema 而不是裸 from_tlabel_v1：后者会丢掉
+                # slip_velocity 提取和 compliance_level（恒写 L1）等增强。
+                schema_v2=self.extract_schema(tlabel_v2),
                 manipulation_phase=phases[i],
                 confidence=confidence,
                 sensor_specific=sensor_specific,

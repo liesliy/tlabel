@@ -378,6 +378,15 @@ class TacQuadAdapter(BaseAdapter):
             tac3d_force=raw_frame_data.get("tac3d_force"),
         )
 
+        return self._v2_to_schema_v2(tlabel_v2)
+
+    def _v2_to_schema_v2(self, tlabel_v2: Dict[str, Any]) -> TLabelSchemaV2:
+        """把 22 维 flat 特征映射到 14 维 Schema V2（L1 自评）。
+
+        ``load()`` 与 ``extract_schema()`` 共用：TacQuad 无可靠力测量，
+        force_magnitude / object_deformation 一律 None，避免
+        ``from_tlabel_v1`` 把视觉形变代理当成力写进帧里。
+        """
         contact = float(tlabel_v2["contact"]) > 0.5
         centroid_x = tlabel_v2.get("centroid_x", 0.5)
         is_slip = float(tlabel_v2["slip_event"]) > 0.5
@@ -399,22 +408,28 @@ class TacQuadAdapter(BaseAdapter):
             compliance_level=self.default_compliance_level,
         )
 
-    def get_capabilities(self):
+    def get_capabilities(self) -> Dict[str, bool]:
+        """13 个合法能力键（Schema V2，规范 S-7.4-1）。
+
+        判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
+        理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
+        TacQuad 视觉触觉（作者 L1 自评）。无可靠力测量，force_magnitude 与
+        object_deformation 在帧里一律 null，不得声明。
+        """
         return {
-            "contact": True, "deformation_magnitude": True,
-            "force_magnitude": True, "force_peak": True,
-            "force_direction": True, "slip_entropy": True,
-            "slip_event": True, "texture_energy": True,
-            "edge_density": True, "contact_area": True,
-            "centroid_x": True,
-            "normal_field_magnitude": True, "normal_field_variance": True,
-            "shear_field_magnitude": True, "shear_field_direction": True,
-            "delta_force_normal": True, "delta_force_shear": True,
-            "friction_cone_ratio": True,
-            "optical_flow_magnitude": True,
-            "optical_flow_direction": True,
-            "temporal_deformation_rate": True,
-            "contact_transition": True,
+            "contact": True,
+            "contact_centroid": True,
+            "contact_region": False,
+            "force_magnitude": False,  # L1：无可靠力测量，帧内恒 null
+            "force_vector": False,
+            "torque_vector": False,
+            "slip_event": True,  # 由差分图梯度检测
+            "slip_velocity": False,
+            "manipulation_phase": True,
+            "texture_class": False,
+            "object_deformation": False,  # L1：无可靠形变测量，帧内恒 null
+            "temperature": False,
+            "confidence": True,
         }
 
     def get_sensor_info(self):
@@ -727,7 +742,7 @@ class TacQuadAdapter(BaseAdapter):
                 frame = TLabelFrame(
                     frame_idx=len(frames),
                     timestamp_s=round((t - start_frame) / 30.0, 4),
-                    schema_v2=TLabelSchemaV2.from_tlabel_v1(tlabel_v2),
+                    schema_v2=self._v2_to_schema_v2(tlabel_v2),
                     manipulation_phase="idle",
                     confidence=confidence,
                     sensor_specific=sensor_specific,

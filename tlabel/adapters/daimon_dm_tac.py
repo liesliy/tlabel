@@ -60,29 +60,27 @@ class DaimonDmTacAdapter(SensorAdapterBase):
         return [".avi", ".bag"]
 
     def get_capabilities(self) -> Dict[str, bool]:
+        """13 个合法能力键（Schema V2，规范 S-7.4-1）。
+
+        判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
+        理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
+        戴盟 DM-Tac 三路（deformation/shear/depth）实时传感器。单目无法得到 3D
+        力矢量；manipulation_phase 在 load 中写死哨兵值 idle，不构成阶段能力。
+        """
         return {
             "contact": True,
-            "deformation_magnitude": True,
-            "force_magnitude": True,
-            "force_peak": True,
-            "force_direction": True,
-            "slip_entropy": True,
+            "contact_centroid": True,
+            "contact_region": False,
+            "force_magnitude": True,  # 由形变灰度图经验映射（×100），非标定牛顿值
+            "force_vector": False,
+            "torque_vector": False,
             "slip_event": True,
-            "texture_energy": True,   # 从deformation视频算
-            "edge_density": True,     # 从deformation视频算
-            "contact_area": True,
-            "centroid_x": True,
-            "normal_field_magnitude": True,
-            "normal_field_variance": True,
-            "shear_field_magnitude": True,  # 从shear视频算
-            "shear_field_direction": True,  # 从shear视频算
-            "delta_force_normal": True,
-            "delta_force_shear": True,
-            "friction_cone_ratio": True,
-            "optical_flow_magnitude": True,   # 从deformation视频算
-            "optical_flow_direction": True,   # 从deformation视频算
-            "temporal_deformation_rate": True,
-            "contact_transition": True,
+            "slip_velocity": True,  # 由 shear 通道换算
+            "manipulation_phase": False,  # load 写死 "idle" 哨兵，不做阶段推断
+            "texture_class": False,
+            "object_deformation": True,  # 由 deformation_magnitude 映射
+            "temperature": False,
+            "confidence": True,
         }
 
     def get_sensor_info(self) -> Dict[str, Any]:
@@ -378,7 +376,9 @@ class DaimonDmTacAdapter(SensorAdapterBase):
             frame_data = TLabelFrame(
                 frame_idx=frame_idx,
                 timestamp_s=round(frame_idx * dt, 4),
-                schema_v2=TLabelSchemaV2.from_tlabel_v1(tlabel_v2),
+                # 走 extract_schema：它会用 shear 场合成 force_vector，
+                # 裸 from_tlabel_v1 会把这个增强丢掉。
+                schema_v2=self.extract_schema(frame),
                 manipulation_phase="idle",
                 confidence=0.8 if contact > 0.5 else 0.95,
                 sensor_specific={
@@ -511,7 +511,9 @@ class DaimonDmTacAdapter(SensorAdapterBase):
                 frame_data = TLabelFrame(
                     frame_idx=fi,
                     timestamp_s=round(fi / sample_rate, 4),
-                    schema_v2=TLabelSchemaV2.from_tlabel_v1(tlabel_v2),
+                    # 走 extract_schema：它会用 shear 场合成 force_vector，
+                # 裸 from_tlabel_v1 会把这个增强丢掉。
+                schema_v2=self.extract_schema(frame),
                     manipulation_phase="idle",
                     confidence=0.8 if contact > 0.5 else 0.95,
                     sensor_specific={

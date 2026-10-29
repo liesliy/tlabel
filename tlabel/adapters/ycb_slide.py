@@ -269,6 +269,15 @@ class YCBSlideAdapter(BaseAdapter):
             is_contact=raw_frame_data["is_contact"],
         )
 
+        return self._v2_to_schema_v2(tlabel_v2)
+
+    def _v2_to_schema_v2(self, tlabel_v2: Dict[str, Any]) -> TLabelSchemaV2:
+        """把 22 维 flat 特征映射到 14 维 Schema V2（L2 自评）。
+
+        ``load()`` 与 ``extract_schema()`` 共用。注意 force_magnitude 是
+        ``deformation_magnitude`` 的视觉近似、confidence 是按接触状态写死的
+        常数，不是真实力/置信度估计。
+        """
         contact = float(tlabel_v2["contact"]) > 0.5
         centroid_x = tlabel_v2.get("centroid_x", 0.5)
 
@@ -290,24 +299,27 @@ class YCBSlideAdapter(BaseAdapter):
         )
 
     def get_capabilities(self) -> Dict[str, bool]:
+        """13 个合法能力键（Schema V2，规范 S-7.4-1）。
+
+        判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
+        理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
+        YCB-Slide（DIGIT）。force_magnitude 是形变近似；confidence 是按接触
+        状态写死的常数（0.95/0.8），不是真实置信度估计。
+        """
         return {
-            "contact": True, "deformation_magnitude": True,
-            "force_magnitude": True, "force_peak": True,
-            "force_direction": True, "slip_entropy": True,
-            "slip_event": True, "texture_energy": True,
-            "edge_density": True, "contact_area": True,
-            "centroid_x": True,
-            "normal_field_magnitude": True, "normal_field_variance": True,
-            "shear_field_magnitude": False,  # DIGIT 无剪切场
-            "shear_field_direction": False,
-            "delta_force_normal": False,  # 单帧无差分
-            "delta_force_shear": False,
-            "friction_cone_ratio": False,
-            # 时序4维
-            "optical_flow_magnitude": False,
-            "optical_flow_direction": False,
-            "temporal_deformation_rate": False,
-            "contact_transition": False,
+            "contact": True,
+            "contact_centroid": True,
+            "contact_region": False,
+            "force_magnitude": True,  # 由 deformation_magnitude 近似，非标定牛顿值
+            "force_vector": False,
+            "torque_vector": False,
+            "slip_event": True,
+            "slip_velocity": False,
+            "manipulation_phase": True,
+            "texture_class": False,
+            "object_deformation": True,  # 由 deformation_magnitude 映射
+            "temperature": False,
+            "confidence": True,  # heuristic：按接触状态写死 0.95/0.8
         }
 
     def get_sensor_info(self) -> Dict[str, Any]:
@@ -536,7 +548,7 @@ class YCBSlideAdapter(BaseAdapter):
                     frame = TLabelFrame(
                         frame_idx=frame_offset + i,
                         timestamp_s=round(ts, 4),
-                        schema_v2=TLabelSchemaV2.from_tlabel_v1(tlabel_v2),
+                        schema_v2=self._v2_to_schema_v2(tlabel_v2),
                         manipulation_phase=phase,
                         confidence=confidence,
                         sensor_specific=sensor_specific,
@@ -718,7 +730,7 @@ class YCBSlideAdapter(BaseAdapter):
                     frame = TLabelFrame(
                         frame_idx=frame_offset + i,
                         timestamp_s=round(ts, 4),
-                        schema_v2=TLabelSchemaV2.from_tlabel_v1(tlabel_v2),
+                        schema_v2=self._v2_to_schema_v2(tlabel_v2),
                         manipulation_phase=phase,
                         confidence=confidence,
                         sensor_specific=sensor_specific,

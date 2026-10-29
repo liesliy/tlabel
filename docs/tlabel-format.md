@@ -75,6 +75,27 @@ Boolean declarations for each semantic dimension:
 | `temperature` | bool | Contact surface temperature (°C) |
 | `confidence` | bool | Annotation confidence score |
 
+**Normative key set.** These 13 keys are the complete, closed set — they are the
+only keys permitted in `capabilities` (`additionalProperties: false` in
+`schema/tlabel-schema.json`, clause S-7.4-1). Note that the set has **13**
+members while the frame schema has **14** dimensions: `compliance_level` is a
+frame-level metadata field, **not** a capability, and must never appear in
+`capabilities` (S-7.4-2). `contact` is the only required key; an adapter that
+genuinely cannot detect contact should declare `"contact": false` rather than
+omit it.
+
+**Declarations must match output.** Declaring a dimension `true` obliges the
+producer to emit a non-null value for it in every frame where the sensor can
+observe it; declaring it `false` obliges the producer to emit `null`
+(S-6.3-2, S-6.3-3). A capability is a claim about what the file actually
+contains, not about what the hardware could in principle measure.
+
+**Legacy files.** Files written before v0.24.0 may carry the pre-Schema-V2
+capability dictionaries (`has_image`, `has_force`, `dimensions`, …). Readers
+must accept them: unknown keys are dropped on read and preserved verbatim under
+`episode_info.legacy_capabilities`, so no information is lost. See
+[MIGRATION.md](../MIGRATION.md) for the full migration note.
+
 ```json
 {
   "capabilities": {

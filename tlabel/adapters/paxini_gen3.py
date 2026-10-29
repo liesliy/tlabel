@@ -163,6 +163,15 @@ class PaxiniGen3Adapter(SensorAdapterBase):
         )
 
         # 从22维dict映射到14维Schema V2
+        return self._v2_to_schema_v2(tlabel_v2)
+
+    def _v2_to_schema_v2(self, tlabel_v2: Dict[str, Any]) -> TLabelSchemaV2:
+        """把 22 维 flat 特征映射到 14 维 Schema V2。
+
+        ``load()`` 与 ``extract_schema()`` 共用这一段：load 侧已经算过
+        ``_compute_tlabel_v2``，再调一次 extract_schema 只会重复计算，
+        且 ``prev_state`` 的滑移检测语义会错位。
+        """
         contact = float(tlabel_v2["contact"]) > 0.5
         centroid_x = tlabel_v2.get("centroid_x", 0.5)
 
@@ -185,30 +194,28 @@ class PaxiniGen3Adapter(SensorAdapterBase):
 
     # ─── 能力声明 ─────────────────────────────────────────────
 
-    def get_capabilities(self, file_path=None) -> Dict[str, bool]:
+    def get_capabilities(self) -> Dict[str, bool]:
+        """13 个合法能力键（Schema V2，规范 S-7.4-1）。
+
+        判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
+        理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
+        帕西尼 Gen3 压力阵列（实时 + 兼容 load）。压力阵列无法测 3D 力方向；
+        object_deformation 实为压力均值代理量。
+        """
         return {
             "contact": True,
-            "deformation_magnitude": True,
-            "force_magnitude": True,
-            "force_peak": True,
-            "force_direction": False,       # 压力阵列无法直接推断方向
-            "slip_entropy": True,
-            "slip_event": True,
-            "texture_energy": False,         # 非视觉传感器
-            "edge_density": False,           # 非视觉传感器
-            "contact_area": True,
-            "centroid_x": True,
-            "normal_field_magnitude": True,
-            "normal_field_variance": True,
-            "shear_field_magnitude": False,
-            "shear_field_direction": False,
-            "delta_force_normal": True,
-            "delta_force_shear": False,
-            "friction_cone_ratio": False,
-            "optical_flow_magnitude": False, # 无视频流
-            "optical_flow_direction": False, # 无视频流
-            "temporal_deformation_rate": True,
-            "contact_transition": True,
+            "contact_centroid": True,
+            "contact_region": False,
+            "force_magnitude": True,  # 由 total_force_n 映射（SDK 标定值）
+            "force_vector": False,
+            "torque_vector": False,
+            "slip_event": True,  # 真实滑移检测（质心偏移 + 力变化率）
+            "slip_velocity": False,
+            "manipulation_phase": True,
+            "texture_class": False,
+            "object_deformation": True,  # pressure proxy, not physical deformation
+            "temperature": False,
+            "confidence": True,
         }
 
     def get_sensor_info(self, file_path=None) -> Dict[str, Any]:
@@ -386,7 +393,7 @@ class PaxiniGen3Adapter(SensorAdapterBase):
             frame = TLabelFrame(
                 frame_idx=frame_idx,
                 timestamp_s=round(timestamp_s, 6),
-                schema_v2=TLabelSchemaV2.from_tlabel_v1(tlabel_v2),
+                schema_v2=self._v2_to_schema_v2(tlabel_v2),
                 manipulation_phase=phase,
                 confidence=confidence,
                 sensor_specific=sensor_specific,
@@ -549,7 +556,7 @@ class PaxiniGen3Adapter(SensorAdapterBase):
             frame = TLabelFrame(
                 frame_idx=seq,
                 timestamp_s=round(timestamp_s, 6),
-                schema_v2=TLabelSchemaV2.from_tlabel_v1(tlabel_v2),
+                schema_v2=self._v2_to_schema_v2(tlabel_v2),
                 manipulation_phase=phase,
                 confidence=confidence,
                 sensor_specific=sensor_specific,
