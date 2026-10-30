@@ -25,6 +25,11 @@ from tlabel.core.schema import SCHEMA_V2_FIELD_NAMES
 # 14 维 Schema V2 特征空间字段列表
 SCHEMA_V2_DIMENSIONS = list(SCHEMA_V2_FIELD_NAMES)
 
+#: validate 接受的 format 标记。``tlabel_v2`` 是旧 22 维格式的标记，
+#: ``tlabel_schema_v2`` 是 Schema V2 导出器（core/types.py 的 to_dict）写入的标记。
+#: 两者都是本工具产出的合法格式，校验时不能只认其中一个。
+_ACCEPTED_FORMAT_TAGS = ("tlabel_v2", "tlabel_schema_v2")
+
 # 旧 22 维 tlabel_v2 特征空间（向后兼容）
 LEGACY_V2_DIMENSIONS = [
     "contact",
@@ -114,9 +119,12 @@ def _validate_json_file(path: Path) -> List[ValidationResult]:
 
     if "format" not in data:
         results.append(ValidationResult("error", "缺少 format 字段", "format"))
-    elif data["format"] != "tlabel_v2":
+    elif data["format"] not in _ACCEPTED_FORMAT_TAGS:
+        # v0.24.2: 原先只认 'tlabel_v2'，而导出器写的是 'tlabel_schema_v2'，
+        # 导致 validate 对本工具自己导出的文件报警告。
+        expected = " 或 ".join(f"'{t}'" for t in _ACCEPTED_FORMAT_TAGS)
         results.append(ValidationResult("warning",
-            f"format 为 '{data['format']}'，预期 'tlabel_v2'", "format"))
+            f"format 为 '{data['format']}'，预期 {expected}", "format"))
 
     # 检查 frames
     if "frames" not in data:
@@ -959,9 +967,17 @@ def cmd_template_validate(args):
 
 
 def main():
+    from tlabel._version import __version__
+
     parser = argparse.ArgumentParser(
         prog="tlabel",
         description="TLabel — 触觉数据标注工具包 CLI",
+    )
+    # v0.24.2: 支持 `tlabel --version`。此前只有 `tlabel version` 子命令，
+    # 而 --version 是绝大多数 CLI 的通用约定，新用户第一反应都是敲这个。
+    parser.add_argument(
+        "--version", action="version", version=f"tlabel {__version__}",
+        help="显示版本号（等价于 `tlabel version`）",
     )
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
 

@@ -9,10 +9,59 @@ from typing import Optional, List
 
 from tlabel.core.types import TLabelData, TLabelFrame
 from tlabel.core.schema import TLabelSchemaV2
-from tlabel.core.capabilities import filter_capabilities
+from tlabel.core.capabilities import CAPABILITY_KEYS, filter_capabilities
 
 # 内置Demo数据目录
 _DEMO_DIR = Path(__file__).parent / "demo_data"
+
+
+def _value_has_signal(value) -> bool:
+    """判断一个维度取值是否携带真实输出（而非占位零值）。"""
+    if isinstance(value, (list, tuple)):
+        return any(
+            v is not None and abs(float(v)) > 0.0 for v in value
+        )
+    try:
+        return abs(float(value)) > 0.0
+    except (TypeError, ValueError):
+        # 枚举等非数值类型：只要能取到就不是缺失
+        return True
+
+
+def _infer_capabilities_from_frames(frames) -> dict:
+    """扫描帧内容反推 capabilities 声明。
+
+    内置 demo 文件携带的是 22 维时代的旧 caps（``has_image`` / ``dimensions``
+    等），与 Schema V2 的 13 个能力键没有逐键对应关系，归一化后会是空集。
+    此时若退化为"只声明 contact"，导出文件的 ``capabilities`` 就会与实际帧
+    内容自相矛盾（S-6.3-3）——例如 gelsight demo 有 106 帧 force_magnitude
+    真实数据，文件头却只写 contact，下游按 caps 解析会漏读整列。
+
+    判定规则：
+
+    - ``None`` 是 tlabel 表达"该帧缺失此维度"的唯一标记，跳过；
+    - bool 键取到 ``False`` 也算有效输出（"这一帧没有接触/没有滑移"是判断，
+      不是缺失）；
+    - 数值与向量只在出现过非零值时声明，避免把全零占位列误报为能力；
+    - ``contact`` 是 schema 必填键，始终出现在结果里。
+    """
+    inferred: dict = {}
+    for frame in frames:
+        schema = getattr(frame, "schema_v2", None)
+        if schema is None:
+            continue
+        for key in CAPABILITY_KEYS:
+            if inferred.get(key):
+                continue
+            value = getattr(schema, key, None)
+            if value is None:
+                continue
+            if isinstance(value, bool) or _value_has_signal(value):
+                inferred[key] = True
+        if len(inferred) == len(CAPABILITY_KEYS):
+            break
+    inferred.setdefault("contact", False)
+    return inferred
 
 # 可用的Demo传感器列表
 AVAILABLE_SENSORS = [
@@ -158,18 +207,25 @@ def demo(sensor: Optional[str] = None, **kwargs) -> TLabelData:
 
     # v0.23.3: 内置 demo 数据文件携带的是 22 维时代的旧 caps 结构
     # （has_image / dimensions / 旧字段名），与 Schema V2 的 13 个能力键
-    # 没有可靠的逐键对应关系。此处采用"读宽容、写规范"策略：
-    #   - 对外只声明最小合法能力集（contact 为 schema 必填项）；
-    #   - 原始旧 caps 完整保留在 episode_info.legacy_capabilities，不丢信息。
+    # 没有可靠的逐键对应关系。原始旧 caps 完整保留在
+    # episode_info.legacy_capabilities，不丢信息。
+    #
+    # v0.24.2: 旧 caps 归一化后若为空集，原先退化为"只声明 contact"。但帧里
+    # 明明有 force_magnitude / slip_event 等真实数据，导出文件因此声明与输出
+    # 自相矛盾（违反 S-6.3-3），下游按 caps 判断字段是否存在会整列漏读。
+    # 改为扫描帧内容反推，保证"声明即输出"。
     raw_caps = raw.get("capabilities", {}) or {}
-    normalized_caps = filter_capabilities(raw_caps)
     episode_info = dict(raw.get("episode", {}) or {})
-    if raw_caps and normalized_caps != raw_caps:
+    legacy_caps = filter_capabilities(raw_caps)
+    if raw_caps and legacy_caps != raw_caps:
         # 旧 caps 未被完整表达（含无交集的旧结构），原始内容原样留档
         episode_info.setdefault("legacy_capabilities", raw_caps)
-    if not normalized_caps:
-        # 旧结构与 13 键无交集：退化为最小合法声明
-        normalized_caps = {"contact": True}
+
+    normalized_caps = _infer_capabilities_from_frames(frames)
+    for key, value in legacy_caps.items():
+        if value:
+            normalized_caps[key] = True
+    normalized_caps = filter_capabilities(normalized_caps)
 
     data = TLabelData(
         frames=frames,

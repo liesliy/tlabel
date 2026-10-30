@@ -4,6 +4,25 @@ All notable changes to the TLabel project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.24.2] - 2026-10-30
+
+修三个"第一眼就会撞上"的问题：装完包跑 `tlabel.demo()` 和 `tlabel validate`，都会立刻看到不一致。
+
+### Fixed
+
+- **`tlabel.demo()` 的 capabilities 声明与实际输出不符**：`demo_data/*.json` 携带的是 22 维时代的旧 caps（`has_image` / `has_force` / `dimensions`），与 Schema V2 的 13 个能力键无交集，归一化后为空集，此前退化为"只声明 `contact`"。但帧里明明有真实数据——gelsight demo 有 106 帧 `force_magnitude`、17 帧 `slip_event`、150 帧 `object_deformation`，文件头却只写 `contact`，违反 S-6.3-3。下游按 caps 判断字段是否存在会整列漏读。改为扫描帧内容反推声明（`_infer_capabilities_from_frames`）：`None` 视为缺失、bool 的 `False` 视为有效判断、数值与向量只在出现过非零值时声明。旧 caps 仍完整保留在 `episode_info["legacy_capabilities"]`。
+- **`tlabel validate` 对本工具导出的文件报警告**：导出器 `to_dict()` 写 `format: "tlabel_schema_v2"`，而校验器只认旧 22 维的 `"tlabel_v2"`，于是导出完顺手校验会得到 `⚠️ format 为 'tlabel_schema_v2'，预期 'tlabel_v2'`。两者都是本工具产出的合法标记，校验器改为同时接受。
+
+### Added
+
+- **`tlabel --version`**：此前只有 `tlabel version` 子命令，`--version` 会报 `unrecognized arguments`。`--version` 是 CLI 通用约定，新用户第一反应都是敲这个。
+
+### Tests
+
+- 新增 13 个测试：内置 demo 的 caps 必须覆盖帧实际输出（参数化覆盖全部 11 个 demo）、caps 必须是 13 键合法子集、`legacy_capabilities` 仍保留、gelsight 力/滑移声明的回归锚点；validate 接受两种 format 标记且未知标记仍告警；`--version` 与 `version` 子命令均可用。508 passed, 1 skipped。
+
+---
+
 ## [0.24.1] - 2026-10-29
 
 补发版，修正 v0.24.0 的打包缺陷。

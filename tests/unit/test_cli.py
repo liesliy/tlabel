@@ -187,3 +187,76 @@ class TestExportFormatAliases:
         names = _cli_format_names(get_registry())
         assert names == sorted(names)
         assert {"json", "csv", "hdf5", "lerobot", "lerobot_writeback"} <= set(names)
+
+
+class TestValidateFormatTags:
+    """validate 必须接受本工具自己导出的 format 标记（v0.24.2）。
+
+    导出器 ``core/types.py`` 的 ``to_dict`` 写 ``format: tlabel_schema_v2``，
+    而 validate 原先只认旧 22 维的 ``tlabel_v2``，于是用户导出完顺手校验，
+    第一眼就是一个黄色警告——文件本身没问题，是校验器认错了名字。
+    """
+
+    def test_exported_json_has_no_format_warning(self, tmp_path):
+        import tlabel
+
+        out = tmp_path / "g.json"
+        tlabel.demo("gelsight").export(str(out), format="json")
+
+        results = validate_tlabel_file(str(out))
+        fmt_problems = [r for r in results if r.field == "format"]
+        assert fmt_problems == [], [repr(r) for r in fmt_problems]
+
+    def test_legacy_tag_still_accepted(self, tmp_path):
+        data = {
+            "schema_version": "0.16.0",
+            "format": "tlabel_v2",
+            "sensor": {"type": "test"},
+            "capabilities": {"contact": True},
+            "frames": [
+                {"frame_idx": 0, "timestamp_s": 0.0,
+                 "tlabel_v2": {"contact": 1.0}}
+            ],
+        }
+        f = tmp_path / "legacy.json"
+        f.write_text(json.dumps(data), encoding="utf-8")
+        results = validate_tlabel_file(str(f))
+        assert [r for r in results if r.field == "format"] == []
+
+    def test_unknown_tag_still_warns(self, tmp_path):
+        data = {
+            "schema_version": "0.16.0",
+            "format": "something_else",
+            "sensor": {"type": "test"},
+            "capabilities": {"contact": True},
+            "frames": [
+                {"frame_idx": 0, "timestamp_s": 0.0,
+                 "tlabel_v2": {"contact": 1.0}}
+            ],
+        }
+        f = tmp_path / "bad.json"
+        f.write_text(json.dumps(data), encoding="utf-8")
+        warns = [r for r in validate_tlabel_file(str(f))
+                 if r.field == "format" and r.level == "warning"]
+        assert warns, "未知 format 标记仍应告警"
+
+
+class TestCliVersionFlag:
+    """`--version` 是 CLI 通用约定，不能只有 `version` 子命令。"""
+
+    def test_version_flag_exits_zero(self, capsys, monkeypatch):
+        from tlabel.cli import main
+        from tlabel._version import __version__
+
+        monkeypatch.setattr("sys.argv", ["tlabel", "--version"])
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+        assert __version__ in capsys.readouterr().out
+
+    def test_version_subcommand_still_works(self, capsys):
+        from tlabel.cli import cmd_version
+        from tlabel._version import __version__
+
+        assert cmd_version(None) == 0
+        assert __version__ in capsys.readouterr().out

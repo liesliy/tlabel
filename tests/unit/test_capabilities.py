@@ -31,6 +31,19 @@ from tlabel.core.types import TLabelData
 SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schema" / "tlabel-schema.json"
 
 
+def _list_demos() -> list:
+    """延迟导入：``tlabel`` 顶层导入会拉起适配器注册，放在模块级太重。"""
+    import tlabel
+
+    return tlabel.list_demos()
+
+
+def _demo(name: str):
+    import tlabel
+
+    return tlabel.demo(name)
+
+
 # ================================================================
 # 常量与 schema 一致性
 # ================================================================
@@ -305,3 +318,58 @@ class TestExitsNormalize:
         """出口归一化不得篡改对象本身，避免影响后续逻辑。"""
         data = self._dirty_data()
         assert "has_image" in data.capabilities
+
+
+class TestDemoCapabilitiesMatchOutput:
+    """内置 demo 的 capabilities 必须覆盖帧里实际有值的维度。
+
+    v0.24.2 之前，``demo_data/*.json`` 携带的是 22 维时代的旧 caps
+    （``has_image`` / ``dimensions``），与 13 个能力键无交集，归一化后为空集，
+    于是退化成"只声明 contact"。但帧里 force_magnitude / slip_event 等有真实
+    数据，导出文件的 capabilities 与实际输出自相矛盾（S-6.3-3），下游按 caps
+    判断字段是否存在会整列漏读。这里用守护测试钉死"声明即输出"。
+    """
+
+    @staticmethod
+    def _actual_output_keys(data) -> set:
+        from tlabel.demo import _value_has_signal
+
+        actual = set()
+        for frame in data.frames:
+            schema = frame.schema_v2
+            for key in CAPABILITY_KEYS:
+                value = getattr(schema, key, None)
+                if value is None:
+                    continue
+                if isinstance(value, bool) or _value_has_signal(value):
+                    actual.add(key)
+        return actual
+
+    @pytest.mark.parametrize("name", _list_demos())
+    def test_declared_caps_cover_actual_output(self, name):
+        data = _demo(name)
+        declared = {k for k, v in (data.capabilities or {}).items() if v}
+        actual = self._actual_output_keys(data)
+        assert actual <= declared, (
+            f"{name} 声明缺失: {sorted(actual - declared)}"
+            f"（声明 {sorted(declared)}）"
+        )
+
+    @pytest.mark.parametrize("name", _list_demos())
+    def test_caps_are_legal_keys(self, name):
+        caps = _demo(name).capabilities or {}
+        assert set(caps) <= CAPABILITY_KEYS
+        assert caps.get("contact") is not None
+
+    def test_legacy_caps_preserved(self):
+        """旧 22 键 caps 仍要原样留档，不能因为反推声明而丢信息。"""
+        data = _demo("gelsight")
+        legacy = (data.episode_info or {}).get("legacy_capabilities")
+        assert legacy, "legacy_capabilities 应保留旧 caps"
+        assert "has_force" in legacy or "dimensions" in legacy
+
+    def test_gelsight_declares_force_and_slip(self):
+        """回归锚点：gelsight demo 有 106 帧力数据、17 帧滑移，必须声明。"""
+        caps = _demo("gelsight").capabilities
+        assert caps.get("force_magnitude") is True
+        assert caps.get("slip_event") is True
