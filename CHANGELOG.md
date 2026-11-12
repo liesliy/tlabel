@@ -12,8 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 同时新增 **Grabette 适配器**（`grabette`）：LeRobot v3.0 格式的双阵列纯压力触觉，6×6 + 4×8 不对称尺寸，48 个 episode / 19,353 帧，有接触帧 L2。
 
+以及 **SharpaDex 适配器**（`sharpadex`）：双手机器人操作数据集，10 个指尖各 6 轴力/力矩（60 维，30 fps），74 个 episode / 27,361 帧，有接触帧 L3。数据集缺温度通道、`tactile_deform` 视频是空占位、`texture_class` 无法从可用信号推断，因此**不声明 L4**。
+
 ### Added
 
+- **`SharpaDexAdapter`（`tlabel/adapters/sharpadex.py`）**：Sharpa Wave 六轴指尖力/力矩适配器，读 LeRobot v2.1 的 parquet + `observation.images.tactile_raw` 视频。60 维触觉按 `features["observation.tactile"]["names"]` 解析成 `(hand, finger) → {axis: idx}`。新增 extra `tlabel[sharpadex]`。
 - **`GrabetteAdapter`（`tlabel/adapters/grabette.py`）**：Grabette 双阵列压力阵列适配器，读 LeRobot v3.0 的 `data/**/*.parquet`。触觉在 parquet 里，无视频解码，只依赖 `pyarrow`。新增 extra `tlabel[grabette]`。
 - **`DataAdapterBase.iter_frames(file_path, **kwargs) -> Iterator[TLabelFrame]`**：流式入口。基类默认实现基于 `load()`（语义正确但不省内存），具体适配器可覆盖为真流式。
 - **`TLabelData.streamed` / `TLabelData.aggregate_stats`**：标记"这批数据不是完整帧序列"，并提供 `num_frames` / `contact_ratio` / `slip_ratio` / `duration_s` / `phase_counts`。`streamed=True` 时 `num_frames` 与 `duration_s` 改读 `aggregate_stats`，避免下游把 `frames=[]` 误判成空数据。
@@ -69,6 +72,42 @@ Grabette 实测（`CarolinePascal/grabette-tactile-full-synced`，Apache-2.0，�
 
 **slip 阈值**来自该数据集 7,596 个"接触→接触"帧对的实测分布：质心位移 p95 = 0.053、压力相对变化 p95 = 0.22，取整为 `0.05` / `0.25`。换传感器应重新标定，两个阈值都可通过 kwargs 覆盖。
 
+### Datasets（SharpaDex）
+
+SharpaDex 实测（`Sharpa-Robotics/SharpaDex-v1.0`，CC-BY-4.0，`place_ball_in_box` 的 1 个 season，74 个 episode / 27,361 帧）：
+
+| 项 | 值 |
+| --- | --- |
+| 数据集总大小 | 约 19.6 GB（一个 season）；适配器实际需要 `meta/` + `data/` 共 30.7 MB |
+| 处理耗时 | `iter_frames()` 23.4 s（74 个 episode 全量）/ `load()` 8.4 s（单 episode，含 `tactile_raw` 视频解码） |
+| 峰值内存 | 167.0 MB |
+| `compliance_level` | L3 × 14,249（有接触）+ L1 × 13,112（无接触） |
+| `contact` | 14,249 / 27,361，`slip_event` 773 |
+| `contact_region` | 恒为 `digital`（10 个点全在指尖） |
+| `manipulation_phase` | pre_contact 13,112 / lift 5,813 / hold 5,023 / grasp 1,895 / place 1,518 |
+| `sensor_specific["phase_source"]` | annotation_segment 22,335 / contact_heuristic 5,026 |
+| 受力最大手指 | right_thumb 8,744 / right_index 4,862 / right_middle 643（左手全程 ≤ 0.085 N） |
+| `object_deformation` | 有接触帧有值，取该帧各受力手指 tile 的最大变化像素比例 |
+| 单 episode 导出 | 459 帧 → 1251.9 KB，`validate` 0 错误 0 警告 |
+
+**`force_magnitude` 是十指模长之和，不是单指力**。数据集 README 明确写着力/力矩表达在各自 `*_elastomer` 局部系，10 根手指的矢量不在同一坐标系，直接相加没有物理意义。因此 `force_magnitude = Σ‖f‖₂`（标量，与坐标系无关），`force_vector` / `torque_vector` 只取当帧受力最大那根手指的矢量，并在 `sensor_specific` 记录 `force_vector_finger` 和 `force_vector_frame = "fingertip_elastomer_local"`。
+
+**`contact_centroid` 在手指序位空间**。触觉是 10 个离散点，没有连续表面，质心按各指力模长加权落在 `x ∈ {0.1, 0.3, 0.5, 0.7, 0.9}`（thumb→little）、`y ∈ {0.25, 0.75}`（left/right）。`sensor_specific["contact_centroid_space"] = "finger_ordinal"`，不是物理坐标。
+
+**`manipulation_phase` 用数据集的 `segments`**。`meta/annotations.jsonl` 每行带 3 段动作标注（pick / move / place），映射到 Schema 枚举：pick 有接触 → `grasp`、无接触 → `pre_contact`；move → `lift`；place → `place`；段外（363-458 帧，松手收尾）有接触 → `hold`、无接触 → `pre_contact`。`subtask_index` 的取值 `3` 是占位符不是第四个子任务——`subtasks.jsonl` 第 4 行是全局任务描述。
+
+**`object_deformation` 来自 `tactile_raw` 的逐像素差异**。视频是 10 个指尖相机拼图，**2 行 × 5 列，row 0 = left，row 1 = right，col 0..4 = thumb / index / middle / ring / little**，每 tile 320×240。取 `|frame − 基线|` 中超过 15 灰度的像素比例作为形变代理（基线 = 前 30 帧均值）。实测 episode 0 的 right_thumb：空手 0.0000、抓稳 0.56、释放后残余 0.03-0.08。**不用全局 std**：接触时 std 只从 32.69 升到 34.53（+5.6%），Laplacian 方差变化不到 10%，与 H.264 压缩噪声同量级，被传感器表面固定的棋盘格纹路稀释。
+
+**为什么只到 L3**：三个数据本身的限制，不是适配器缺陷——
+
+1. `observation.images.tactile_deform` 74 个文件共 9.9 MB（每个 0.08-0.19 MB），459 帧全部 `mean=0, std=0`、相邻帧差 0.000，是空占位文件。ROADMAP 原本计划从这里取 `object_deformation` 和 `texture_class`，实际一个都取不到。
+2. `texture_class` 的 6 个枚举需要物体表面纹理信息，`tactile_raw` 拍的是指尖弹性体形变，看不出被接触材质。恒为 `None`，`capabilities["texture_class"] = False`。靠"任务描述说是球、球是光滑的"填值不是触觉标注。
+3. 数据集不提供温度通道，`temperature` 恒为 `None`，`capabilities["temperature"] = False`。
+
+13 维里实际有值 11 维（缺 `texture_class` / `temperature`），`TLabelSchemaV2.validate()` 全量 27,361 帧 0 失败。
+
+**v3.0 不可下载**：同一 season 的 `lerobot_v3.0/` 下所有文件返回 503/502（三次验证规律稳定），只能用 `lerobot_v2.1`。适配器按 `info.json` 的 `data_path` / `video_path` 模板解析，模板含 `{file_index}` 时会去 `meta/episodes/` 查真实映射，查不到报错而非猜测。
+
 ### Compatibility
 
 逐字段一致性实测（daimon 真实数据集，663 帧）：
@@ -79,7 +118,7 @@ Grabette 实测（`CarolinePascal/grabette-tactile-full-synced`，Apache-2.0，�
 
 ### Tests
 
-- 565 passed, 4 skipped。其中 60 个是 `tests/test_adapter_grabette.py` 新增（双阵列统计、九宫格位置、`contact_region` 枚举合法性、逐帧 L1/L2 判定、单位不虚构、slip 阈值、流式与 `load()` 一致、pandas index 任务描述）。
+- 627 passed, 4 skipped。其中 60 个是 `tests/test_adapter_grabette.py` 新增（双阵列统计、九宫格位置、`contact_region` 枚举合法性、逐帧 L1/L2 判定、单位不虚构、slip 阈值、流式与 `load()` 一致、pandas index 任务描述），57 个是 `tests/test_adapter_sharpadex.py` 新增（60 维名字解析、v2.1/v3.0 路径模板、十指模长求和、最大指矢量、手指序位质心、`segments` 到 phase 的映射、L1/L3 判定、`validate()` 全通过、`per_finger` 的 JSON 可序列化）。
 - Windows 下需设 `PYTHONUTF8=1`：`test_json_export` 因 `open()` 未指定 encoding 在 GBK 环境下读 UTF-8 JSON 失败，是既有环境问题，与本次改动无关。
 
 ---

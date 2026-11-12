@@ -35,6 +35,7 @@ _ADAPTER_MODULES = {
     "xela":          ("tlabel.adapters.xela",          "XelaUskinAdapter"),
     "tashan_ts_f_a": ("tlabel.adapters.tashan_ts_f_a", "TashanTsFAAdapter"),
     "grabette":      ("tlabel.adapters.grabette",      "GrabetteAdapter"),
+    "sharpadex":     ("tlabel.adapters.sharpadex",     "SharpaDexAdapter"),
 }
 
 # 社区适配器 entry_point group name

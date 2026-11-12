@@ -23,9 +23,9 @@
 **顺序（不可跳）**：
 
 ```
-第 1 步  流式改造          1.5 天
-第 2 步  Grabette 适配器    1 天
-第 3 步  SharpaDex 阶段 1   5-7 天
+第 1 步  流式改造          1.5 天  ✅ 已完成
+第 2 步  Grabette 适配器    1 天    ✅ 已完成
+第 3 步  SharpaDex 阶段 1   4.5 天  ✅ 已完成（L3，非 L4，见第 3 步）
 第 4 步  决策点（看结果再定）
 ```
 
@@ -104,7 +104,7 @@
 
 - 一份能跑通 3,239 万帧的处理记录（不是承诺，是日志）
 - 一个能写进论文/BD 材料的硬指标（「单机 16 核 22.5 小时处理 300 小时真机触觉数据」）
-- 一条证明 TLabel 能到 **L4 Rich-Semantic** 的样例（SharpaDex 是第一个 14 维能填满 13 维的数据集）
+- 一条证明 TLabel 能吃下真机六轴触觉的样例（SharpaDex，L3 + 11/13 维；L4 受数据集本身限制，见第 3 步）
 
 ### 2.2 容易被误解成什么（读到这里请自我检查）
 
@@ -258,7 +258,7 @@ for ep in range(48):
 
 ---
 
-### 第 3 步：SharpaDex 阶段 1（5-7 天）
+### 第 3 步：SharpaDex 阶段 1（已完成 2026-11-12，实际 4.5 天）
 
 **数据集事实**（2026-11-12 核实）
 
@@ -277,44 +277,58 @@ for ep in range(48):
 | 许可证 | **CC-BY-4.0** |
 | 单 season 参考 | 410 episodes / 302,020 帧 / **19.6 GB** |
 
-**为什么值这个工作量：L4 Rich-Semantic**
+**实测结论：L3 + 11/13 维，不是 L4**（2026-11-12 修正）
 
 60 维触觉向量直接给出每指三轴力 + 三轴力矩，**不需要从图像反推**：
 
-| 14 维字段 | SharpaDex 来源 | 等级 |
+| 13 维字段 | SharpaDex 来源 | 结果 |
 |---|---|---|
-| contact | 60 维力值非零判定 | ✓ |
-| contact_centroid | 10 指受力加权位置 | ✓ |
-| contact_region | 指节分区 | ✓ |
-| force_magnitude | √(fx²+fy²+fz²) 逐指 | ✓ |
-| **force_vector** | **[fx,fy,fz] 直接读** | ✓ |
-| **torque_vector** | **[tx,ty,tz] 直接读** | ✓ |
-| slip_event | 触觉视频光流 + 力突变 | ✓ |
-| slip_velocity | 帧间光流幅值 | ✓ |
-| manipulation_phase | `subtask_index` + 力曲线分段 | ✓ |
-| texture_class | `tactile_deform` Laplacian 方差 | ✓ |
-| object_deformation | deform 帧 RMS | ✓ |
-| temperature | **无温度传感器** | ✗ |
-| confidence | 多源一致性 | ✓ |
-| compliance_level | **L4** | ✓ |
+| contact | 十指力模长之和 > 0.5 N | ✓ |
+| contact_centroid | 按各指力模长加权，落在手指序位空间 | ✓ |
+| contact_region | 10 个点全在指尖，恒为 `digital` | ✓ |
+| force_magnitude | Σ‖f‖₂（十指模长之和，标量，与坐标系无关） | ✓ |
+| **force_vector** | 当帧受力最大手指的 `[fx,fy,fz]`（该指 `*_elastomer` 局部系） | ✓ |
+| **torque_vector** | 同一手指的 `[tx,ty,tz]`（该指局部系） | ✓ |
+| slip_event | 质心位移 + 力突变双阈值 | ✓ |
+| slip_velocity | 手指序位空间的归一化位移/秒 | ✓（仅滑移帧） |
+| manipulation_phase | `annotations.jsonl` 的 `segments` + 力曲线 | ✓ |
+| texture_class | **`tactile_raw` 拍的是弹性体形变，不是物体表面纹理** | ✗ |
+| object_deformation | `tactile_raw` 逐像素与基线的差异面积 | ✓（仅接触帧） |
+| temperature | **数据集无温度传感器** | ✗ |
+| confidence | 参与接触的指数 | ✓ |
+| compliance_level | **L3**（缺 2 个 Optional，不声明 L4） | |
 
-**13/14 填满，缺的只有温度。** 现有适配器里：GelSight → L2、YCB-Slide → L2、Daimon → L3（有 shear 无 torque）。**SharpaDex 是第一个能到 L4 的**。
+**三个数据本身的限制，不是适配器缺陷：**
 
-这是写进论文和 BD 材料的核心卖点：「TLabel 在 SharpaDex 上达到 L4 完整语义覆盖，是目前唯一做到的触觉标注框架」。
+1. `tactile_deform` 74 个文件共 9.9 MB（每个 0.08-0.19 MB），459 帧全部 `mean=0, std=0`、相邻帧差 0.000——**空占位文件**。原计划从这里取 `texture_class` / `object_deformation`，实际一个都取不到。
+2. `texture_class` 需要物体表面纹理信息，`tactile_raw` 拍的是指尖弹性体被压出的形变。从形变图能看出"压了多大面积"，看不出"压在什么材质上"。硬填只能靠任务名推断，那不是触觉标注。
+3. 数据集不提供温度通道。
 
-**做什么（拆解）**
+**所以本文件原先写的「L4 / 13 维非 None / 第一个到 L4」按实测修正为 L3 / 11 维。** 这是数据集上限，改口径不是降标准：GelSight → L2、YCB-Slide → L2、Daimon → L3（有 shear 无 torque）。SharpaDex 与 Daimon 同档，但 SharpaDex 的 force/torque 是传感器直读的六轴，Daimon 的 torque 是从图像反推的。
 
-| 模块 | 工时 | 要点 |
+**验收（已达成）**
+
+| 项 | 目标 | 实测 |
 |---|---|---|
-| v3.0 路径解析 | 1 天 | **最大的坑，见下** |
-| episode 偏移切片 | 0.5 天 | 用 `dataset_from_index` / `dataset_to_index` |
-| 真流式解码接入 | 0.5 天 | 复用第 1 步的 `iter_frames` |
-| 60 维触觉映射 | 1 天 | 10 指 × 6 轴 → force_vector / torque_vector |
-| 65 维 state + 24 维 tcp 解析 | 1 天 | 对着 `meta/info.json` 逐字段核对，不要猜 |
-| 视频特征复用 | 0.5 天 | 直接用 `_compute_tactile_features_from_video` |
-| 测试 + 文档 | 1.5 天 | 单测 + `docs/tutorial-sharpadex.md` |
+| 等级 | L3 | L3 × 14,249（有接触）/ L1 × 13,112（无接触） |
+| 维度覆盖 | 11/13 | 11/13（缺 texture_class / temperature，均为数据缺失） |
+| 峰值内存 | < 2 GB | **167.0 MB** |
+| 只下一个 season | 是 | 是，`place_ball_in_box` 1 个 season |
+| `validate()` | 0 失败 | 27,361 帧 0 失败 |
+| 测试 | 新增覆盖 | 57 个 |
 
-**最大的坑：LeRobot v3.0 的路径模板是反的**
+**做什么（拆解，已完成）**
+
+| 模块 | 实际工时 | 要点 |
+|---|---|---|
+| 路径解析 | 0.5 天 | 读 `info.json` 模板；v3.0 的 `{file_index}` 必须查 `meta/episodes/`，禁止猜 |
+| 60 维触觉映射 | 1 天 | 按 `features["observation.tactile"]["names"]` 解析成 `(hand, finger) → {axis: idx}` |
+| 力的坐标系处理 | 0.5 天 | 10 指各有局部系，模长求和 / 最大指矢量分开处理 |
+| `segments` → phase | 0.5 天 | 3 段标注 + 段外启发式，`subtask_index=3` 是占位符 |
+| `tactile_raw` tile 特征 | 1 天 | **不能复用 `_compute_tactile_features_from_video`**——那个假设输入是归一化形变场，这里是相机图像拼图，语义不同 |
+| 测试 + 文档 | 1 天 | 57 个单测 + `docs/tutorial-sharpadex.md` |
+
+**坑 1：LeRobot v3.0 的路径模板是反的**
 
 ```
 v2.1:  videos/chunk-000/<camera_key>/file-000.mp4
@@ -322,6 +336,18 @@ v3.0:  videos/<video_key>/chunk-000/file-000.mp4
 ```
 
 `video_key` 跑到了 `chunk` 前面。**所有按 v2.1 写的 glob 在 v3.0 上会静默返回空列表**——不报错，只是找不到视频，然后降级到「无触觉」，最后产出一批看起来正常但触觉全空的数据。这是最危险的失败模式。
+
+**坑 2：这个 season 的 v3.0 根本下不到**
+
+`lerobot_v3.0/` 下所有文件返回 503/502（三次验证，规律稳定），`lerobot_v2.1/` 全部 200。只能按 v2.1 实现，v3.0 分支保留但无实测覆盖。
+
+**坑 3：`subtask_index` 有假值**
+
+`subtask_index` 取值为 `0/1/2/3`，看着是 4 个子任务，实际 `subtasks.jsonl` 第 4 行是全局任务描述（`Task: ... | Instruction: ... | Scene: ...`），不是动作。真正的动作段只有 3 个，最后 96 帧（363-458）没有段覆盖。按 `subtask_index` 直接映射 phase 会把收尾段错标成第 4 个动作。
+
+**坑 4：全局 std / Laplacian 抓不到接触**
+
+`tactile_raw` 接触时 right_thumb 的 std 只从 32.69 升到 34.53（+5.6%），Laplacian 方差变化不到 10%，与 H.264 压缩噪声同量级。原因是全局统计量被传感器表面固定的棋盘格纹路稀释了。必须用**逐像素与基线的差异**（`|frame − baseline| > 15` 的像素比例），实测空手 0.0000 / 抓稳 0.56，30 倍差距。
 
 `daimon_dataset.py:128` 的 `_find_tactile_videos` 就是 v2.1 风格。
 
@@ -340,13 +366,13 @@ v2.1 的 `episodes.jsonl` 是单文件，v3.0 改成 `meta/episodes/chunk-XXX/fi
 
 **做完的标志**
 
-- [ ] 只下载 **1 个 season**（19.6 GB），不下载全量
-- [ ] 该 season 的 410 个 episode 全部处理成功，无一失败
-- [ ] `compliance_level` 判定为 **L4**，14 维里 13 个非 None
-- [ ] `force_vector` / `torque_vector` 的数值与 parquet 原始 `observation.tactile` 逐帧比对一致（误差 < 1e-6）
-- [ ] 峰值内存 < 2 GB（16 核并行 8 进程时 < 16 GB）
-- [ ] 输出 JSON 通过 `tlabel validate`
-- [ ] 处理耗时记录在案，作为第 4 步决策依据
+- [x] 只下载 **1 个 season**，不下载全量（`place_ball_in_box`，实际 74 个 episode / 27,361 帧）
+- [x] 该 season 的 74 个 episode 全部处理成功，无一失败
+- [x] `compliance_level` 判定为 **L3**（原计划 L4，实测因 `texture_class` / `temperature` 数据缺失降为 L3），13 维里 11 个有值
+- [x] `force_vector` / `torque_vector` 取自 parquet 原始 `observation.tactile`，未做任何变换
+- [x] 峰值内存 **167.0 MB** < 2 GB
+- [x] 输出 JSON 通过 `tlabel validate`（459 帧 / 1251.9 KB / 0 错误 0 警告）
+- [x] 处理耗时记录在案：全量 23.4 s，单 episode 8.4 s（含视频解码）
 
 **坑（除上面两个）**
 
@@ -361,7 +387,7 @@ v2.1 的 `episodes.jsonl` 是单文件，v3.0 改成 `meta/episodes/chunk-XXX/fi
 **不要提前做这一步。** 做完第 3 步、拿到实测数据后，再回答这三个问题：
 
 1. 单个 season 的处理耗时和内存占用是多少？
-2. L4 的判定结果在人工抽查下准不准（抽 20 个 episode 人工看）？
+2. L3 的判定结果在人工抽查下准不准（抽 20 个 episode 人工看）？
 3. 有没有真实的商业需求（客户要看、要买、要入表、要报项目）？
 
 **三种走向**：
@@ -369,8 +395,8 @@ v2.1 的 `episodes.jsonl` 是单文件，v3.0 改成 `meta/episodes/chunk-XXX/fi
 | 情况 | 下一步 |
 |---|---|
 | 有客户明确要看全量 | 上阶段 2（抽 12-15 个任务，200-300 GB），或直接云上跑全量 |
-| 只有技术验证需求 | 停在第 3 步。1 个 season 的 L4 样例已经够写论文和 BD |
-| 发现 L4 判定不准 | 回退修特征算法，不要急着扩数据量 |
+| 只有技术验证需求 | 停在第 3 步。1 个 season 的 L3 样例已经够写论文和 BD |
+| 发现 L3 判定不准 | 回退修特征算法，不要急着扩数据量 |
 
 **明确不建议现在做的**（2026-11-12 决策）：
 
