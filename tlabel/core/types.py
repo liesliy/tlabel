@@ -214,7 +214,9 @@ class TLabelData:
                  schema_version: str = "0.17.0",
                  sensor_id: Optional[str] = None,
                  calibration_params: Optional[Dict] = None,
-                 sensor_profile: Optional[Dict] = None):
+                 sensor_profile: Optional[Dict] = None,
+                 streamed: bool = False,
+                 aggregate_stats: Optional[Dict] = None):
         self.frames = frames
         self.sensor_info = sensor_info
         self.episode_info = episode_info
@@ -229,6 +231,10 @@ class TLabelData:
         self._predict_results = None
         self.primitive_annotations = []
         self.tactile_events = []
+        # v0.25.0：流式加载标记。streamed=True 时 frames 未完整保留，
+        # 帧数与时长改由 aggregate_stats 提供，避免下游把 num_frames=0 误判为空数据。
+        self.streamed = streamed
+        self.aggregate_stats = aggregate_stats or {}
 
     @staticmethod
     def _apply_sensor_profile_defaults(sensor_profile: Optional[Dict],
@@ -252,10 +258,18 @@ class TLabelData:
 
     @property
     def num_frames(self) -> int:
+        if self.streamed:
+            n = self.aggregate_stats.get("num_frames")
+            if n is not None:
+                return int(n)
         return len(self.frames)
 
     @property
     def duration_s(self) -> float:
+        if self.streamed:
+            d = self.aggregate_stats.get("duration_s")
+            if d is not None:
+                return float(d)
         if not self.frames:
             return 0.0
         return self.frames[-1].timestamp_s - self.frames[0].timestamp_s

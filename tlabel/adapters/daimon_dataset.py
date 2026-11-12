@@ -42,7 +42,8 @@ import struct
 import tempfile
 import numpy as np
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple, Union
+from typing import Optional, Dict, Any, List, Tuple, Union, Iterator
+from itertools import chain
 
 from tlabel.adapters.base import BaseAdapter
 from tlabel.core.types import TLabelData, TLabelFrame
@@ -284,16 +285,16 @@ def _probe_video(video_path: Path) -> Dict[str, Any]:
         return {}
 
 
-def _extract_video_frames(video_path: Path, max_frames: Optional[int] = None) -> List[np.ndarray]:
-    """用cv2逐帧解码常规mp4视频
+def _iter_video_frames(video_path: Path,
+                       max_frames: Optional[int] = None) -> Iterator[np.ndarray]:
+    """用cv2逐帧解码常规mp4视频（生成器，v0.25.0）
 
-    返回: List[np.ndarray] (BGR uint8格式)
-    仅适用于h264/mpeg4等cv2可解码的格式
+    逐帧 yield BGR uint8 数组，不在内存中累积。仅适用于 h264/mpeg4/vp9
+    等 cv2 可解码的格式。
     """
     if not HAS_CV2 or not video_path.exists():
-        return []
+        return
 
-    frames = []
     cap = cv2.VideoCapture(str(video_path))
     try:
         frame_idx = 0
@@ -303,12 +304,22 @@ def _extract_video_frames(video_path: Path, max_frames: Optional[int] = None) ->
             ret, frame = cap.read()
             if not ret:
                 break
-            frames.append(frame)
+            yield frame
             frame_idx += 1
     finally:
+        # 生成器被提前关闭时也要释放解码器，否则句柄泄漏
         cap.release()
 
-    return frames
+
+def _extract_video_frames(video_path: Path, max_frames: Optional[int] = None) -> List[np.ndarray]:
+    """用cv2逐帧解码常规mp4视频
+
+    返回: List[np.ndarray] (BGR uint8格式)
+    仅适用于h264/mpeg4等cv2可解码的格式
+
+    保留此函数以兼容既有调用方与小文件路径；大数据集请用 _iter_video_frames()。
+    """
+    return list(_iter_video_frames(video_path, max_frames=max_frames))
 
 
 def _extract_ffv1_frames(video_path: Path, pix_fmt: str,
@@ -415,22 +426,27 @@ def _extract_ffv1_frames(video_path: Path, pix_fmt: str,
         return []
 
 
-def _extract_ffv1_frames_streaming(video_path: Path, pix_fmt: str,
-                                     width: int, height: int,
-                                     max_frames: Optional[int] = None) -> List[np.ndarray]:
-    """流式提取FFV1视频帧（适合大文件，内存友好）
+def _iter_ffv1_frames(video_path: Path, pix_fmt: str,
+                      width: int, height: int,
+                      max_frames: Optional[int] = None) -> Iterator[np.ndarray]:
+    """流式提取FFV1视频帧（生成器，v0.25.0）
 
-    与_extract_ffv1_frames功能相同，但逐帧读取而非全量加载
+    逐帧从 ffmpeg 子进程 stdout 读取并 yield，不在内存中累积。
+    这是大 episode 不再 OOM 的关键：v0.24.x 的 _extract_ffv1_frames_streaming
+    名字里带 streaming，实际返回 List，整段视频仍会全部进内存。
+
+    pix_fmt 支持 gbrp16le（3平面×16位）与 gray16le（单平面×16位）。
+    产出 float32 数组，形状 (H, W, 3)，已去基线并归一化到 0-1。
     """
     if not HAS_SUBPROCESS:
-        return []
+        return
 
     if pix_fmt == "gbrp16le":
         frame_bytes = width * height * 2 * 3
     elif pix_fmt == "gray16le":
         frame_bytes = width * height * 2
     else:
-        return []
+        return
 
     cmd = [
         "ffmpeg", "-i", str(video_path),
@@ -439,7 +455,7 @@ def _extract_ffv1_frames_streaming(video_path: Path, pix_fmt: str,
         "-"
     ]
 
-    frames = []
+    proc = None
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         frame_count = 0
@@ -466,7 +482,7 @@ def _extract_ffv1_frames_streaming(video_path: Path, pix_fmt: str,
                 mv = max(float(np.percentile(g_sig, 99)), float(np.percentile(b_sig, 99)),
                          float(np.percentile(r_sig, 99)), 1.0)
                 norm = np.stack([r_sig / mv, g_sig / mv, b_sig / mv], axis=-1)
-                frames.append(np.clip(norm, 0.0, 1.0))
+                yield np.clip(norm, 0.0, 1.0)
 
             elif pix_fmt == "gray16le":
                 d = np.frombuffer(raw, dtype='<u2').reshape(height, width).astype(np.float32)
@@ -475,17 +491,39 @@ def _extract_ffv1_frames_streaming(video_path: Path, pix_fmt: str,
                     n = np.repeat((d / d_max).reshape(height, width, 1), 3, axis=-1)
                 else:
                     n = np.zeros((height, width, 3), dtype=np.float32)
-                frames.append(n)
+                yield n
 
             frame_count += 1
-
-        proc.stdout.close()
-        proc.terminate()
-        proc.wait(timeout=5)
     except Exception:
         pass
+    finally:
+        # 生成器被提前关闭（break / 异常）时也必须回收 ffmpeg 子进程，
+        # 否则残留进程会占住管道并拖住整个进程退出。
+        if proc is not None:
+            try:
+                if proc.stdout is not None:
+                    proc.stdout.close()
+            except Exception:
+                pass
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
-    return frames
+
+def _extract_ffv1_frames_streaming(video_path: Path, pix_fmt: str,
+                                   width: int, height: int,
+                                   max_frames: Optional[int] = None) -> List[np.ndarray]:
+    """流式提取FFV1视频帧（返回完整列表）
+
+    保留此函数以兼容既有调用方；真正节省内存请改用 _iter_ffv1_frames()。
+    """
+    return list(_iter_ffv1_frames(video_path, pix_fmt, width, height,
+                                  max_frames=max_frames))
 
 
 def _compute_tactile_features_from_video(deform_frame: Optional[np.ndarray],
@@ -829,41 +867,64 @@ def _extract_tlabel_v2_from_state(state: np.ndarray, action: np.ndarray,
     }
 
 
-def _infer_phases(frames_contact, frames_slip):
-    """从接触和滑移状态推断操作阶段"""
-    phases = []
-    current = "idle"
-    for ic, is_slip in zip(frames_contact, frames_slip):
-        if current == "idle":
-            if ic:
-                current = "initial_contact"
-        elif current == "initial_contact":
+class _PhaseTracker:
+    """操作阶段在线状态机（v0.25.0）
+
+    _infer_phases() 原本就是纯前向状态机：只依赖本帧 contact/slip 与上一状态，
+    不依赖未来帧。因此可以抽成有状态对象，让流式路径边算边产出 phase，
+    不必等整个 episode 处理完再回填——这也是流式输出能与批量输出逐帧一致的前提。
+
+    状态转移表与 v0.24.x 的 _infer_phases 完全一致，未做任何语义调整。
+    """
+
+    __slots__ = ("current",)
+
+    def __init__(self) -> None:
+        self.current = "idle"
+
+    def step(self, is_contact: bool, is_slip: bool) -> str:
+        """推进一步，返回本帧的 manipulation_phase（状态转移之后的值）"""
+        c = self.current
+        if c == "idle":
+            if is_contact:
+                c = "initial_contact"
+        elif c == "initial_contact":
             if is_slip:
-                current = "slip"
-            elif ic:
-                current = "stable_contact"
-        elif current == "stable_contact":
+                c = "slip"
+            elif is_contact:
+                c = "stable_contact"
+        elif c == "stable_contact":
             if is_slip:
-                current = "slip"
-            elif not ic:
-                current = "release"
-        elif current == "slip":
-            if not is_slip and ic:
-                current = "stable_contact"
-            elif not ic:
-                current = "release"
-        elif current == "release":
-            if ic:
-                current = "re_contact"
+                c = "slip"
+            elif not is_contact:
+                c = "release"
+        elif c == "slip":
+            if not is_slip and is_contact:
+                c = "stable_contact"
+            elif not is_contact:
+                c = "release"
+        elif c == "release":
+            if is_contact:
+                c = "re_contact"
             else:
-                current = "idle"
-        elif current == "re_contact":
+                c = "idle"
+        elif c == "re_contact":
             if is_slip:
-                current = "slip"
-            elif ic:
-                current = "stable_contact"
-        phases.append(current)
-    return phases
+                c = "slip"
+            elif is_contact:
+                c = "stable_contact"
+        self.current = c
+        return c
+
+
+def _infer_phases(frames_contact, frames_slip):
+    """从接触和滑移状态推断操作阶段
+
+    v0.25.0：内部改为逐帧驱动 _PhaseTracker，与流式路径共用同一状态机，
+    保证批量与流式输出完全一致。
+    """
+    tracker = _PhaseTracker()
+    return [tracker.step(ic, is_slip) for ic, is_slip in zip(frames_contact, frames_slip)]
 
 
 class DaimonAdapter(BaseAdapter):
@@ -998,17 +1059,18 @@ class DaimonAdapter(BaseAdapter):
 
         return schema
 
-    def load(self, file_path: str,
-             episode_index: Optional[int] = None,
-             max_frames: Optional[int] = None,
-             **kwargs) -> TLabelData:
-        """
-        加载Daimon-Infinity parquet数据
+    def _iter_load(self, file_path: str,
+                   episode_index: Optional[int] = None,
+                   max_frames: Optional[int] = None,
+                   _meta: Optional[Dict[str, Any]] = None,
+                   **kwargs) -> Iterator[TLabelFrame]:
+        """逐帧产出 TLabelFrame（生成器，v0.25.0 从 load() 拆出）
 
-        参数:
-            file_path: parquet文件路径或episode目录路径
-            episode_index: 指定episode (默认加载第一个)
-            max_frames: 最大帧数
+        与 load() 的唯一区别是不累积 frames 列表：deformation / shear 两路视频
+        改为生成器配对推进，内存占用与单帧大小同阶，与 episode 长度无关。
+
+        _meta 传入可变 dict 时，会在准备阶段与收尾阶段写入 sensor_info /
+        episode_info / capabilities / num_frames，供 load() 组装 TLabelData。
         """
         if not HAS_PYARROW:
             raise ImportError("戴盟适配器需要pyarrow: pip install pyarrow")
@@ -1051,35 +1113,48 @@ class DaimonAdapter(BaseAdapter):
         task_idx = int(df["task_index"].iloc[0]) if "task_index" in df.columns else 0
         task_desc = tasks.get(task_idx, "unknown task")
 
-        # === 加载触觉视频（全链路修复） ===
+        # === 加载触觉视频（全链路修复 + v0.25.0 流式配对） ===
+        # 不再把整段视频读成 List，而是拿到生成器，逐帧与 parquet 对齐消费。
         video_paths = _find_tactile_videos(parquet_path)
-        deform_frames = []
-        shear_frames = []
-        cam_frames = []  # 普通相机fallback
+        deform_gen = None
+        shear_gen = None
+        cam_gen = None  # 普通相机fallback
         video_available = False
         video_type = "none"
+
+        def _prefetch(gen):
+            """预读首帧以判定视频是否可用，再把首帧塞回序列开头。
+
+            原实现用 len(frames) > 0 判断可用性，流式下无法预知长度，只能靠首帧探测。
+            """
+            if gen is None:
+                return None
+            first = next(gen, None)
+            if first is None:
+                return None
+            return chain([first], gen)
 
         # 优先加载deformation视频
         if "deformation" in video_paths:
             probe = _probe_video(video_paths["deformation"])
             if probe.get("pix_fmt") in ("gbrp16le", "gray16le"):
                 # FFV1编码 → 用ffmpeg rawvideo提取
-                deform_frames = _extract_ffv1_frames_streaming(
+                deform_gen = _prefetch(_iter_ffv1_frames(
                     video_paths["deformation"],
                     probe["pix_fmt"],
                     probe["width"], probe["height"],
                     max_frames=num_frames,
-                )
-                if len(deform_frames) > 0:
+                ))
+                if deform_gen is not None:
                     video_available = True
                     video_type = "deformation_ffv1"
             elif probe.get("codec") in ("h264", "mpeg4", "vp9"):
                 # 常规编码 → cv2解码
                 if HAS_CV2:
-                    deform_frames = _extract_video_frames(
+                    deform_gen = _prefetch(_iter_video_frames(
                         video_paths["deformation"], max_frames=num_frames
-                    )
-                    if len(deform_frames) > 0:
+                    ))
+                    if deform_gen is not None:
                         video_available = True
                         video_type = "deformation_h264"
 
@@ -1087,28 +1162,33 @@ class DaimonAdapter(BaseAdapter):
         if "shear" in video_paths:
             probe = _probe_video(video_paths["shear"])
             if probe.get("pix_fmt") in ("gbrp16le", "gray16le"):
-                shear_frames = _extract_ffv1_frames_streaming(
+                shear_gen = _prefetch(_iter_ffv1_frames(
                     video_paths["shear"],
                     probe["pix_fmt"],
                     probe["width"], probe["height"],
                     max_frames=num_frames,
-                )
+                ))
             elif probe.get("codec") in ("h264", "mpeg4", "vp9") and HAS_CV2:
-                shear_frames = _extract_video_frames(
+                shear_gen = _prefetch(_iter_video_frames(
                     video_paths["shear"], max_frames=num_frames
-                )
+                ))
 
         # fallback: 普通相机做光流
         if not video_available and "cam" in video_paths and HAS_CV2:
-            cam_frames = _extract_video_frames(video_paths["cam"], max_frames=num_frames)
-            if len(cam_frames) > 0:
+            cam_gen = _prefetch(_iter_video_frames(video_paths["cam"], max_frames=num_frames))
+            if cam_gen is not None:
                 video_available = True
                 video_type = "cam_h264"
 
         # 逐帧处理
-        tlabel_frames = []
-        frames_contact = []
-        frames_slip = []
+        # v0.25.0：不再保留 frames_contact / frames_slip 两个全序列 list，
+        # 3200 万帧规模下它们本身就要占 64 MB，且只有批量推断阶段才用得到。
+        # 阶段改由 _PhaseTracker 在线推进，逐帧产出。
+        tracker = _PhaseTracker()
+        last_deform = None
+        last_shear = None
+        cam_hist = [None, None]  # 普通相机最近两帧，复现 min(i, len-1) 的取帧语义
+        n_cam_read = 0
 
         states = df["observation.state"].values
         actions = df["action"].values if "action" in df.columns else None
@@ -1132,10 +1212,30 @@ class DaimonAdapter(BaseAdapter):
             contact_trans = 0.0
 
             # 帧对齐: 视频帧和parquet帧可能不对齐，用最近邻
-            if len(deform_frames) > 0:
-                fidx = min(i, len(deform_frames) - 1)
-                curr_deform = deform_frames[fidx]
-                curr_shear = shear_frames[fidx] if fidx < len(shear_frames) else None
+            # 流式语义严格等价于原 min(i, len-1)：
+            #   - deform 耗尽后继续复用最后一帧
+            #   - shear 只在 deform 仍在推进时同步推进，耗尽后保持最后一次成功取到的值；
+            #     若 shear 先耗尽（比 deform 短），deform 耗尽后 shear 取 None
+            if deform_gen is not None:
+                try:
+                    curr_deform = next(deform_gen)
+                    last_deform = curr_deform
+                    deform_live = True
+                except StopIteration:
+                    curr_deform = last_deform
+                    deform_live = False
+
+                if not deform_live:
+                    curr_shear = last_shear
+                elif shear_gen is not None:
+                    try:
+                        curr_shear = next(shear_gen)
+                        last_shear = curr_shear
+                    except StopIteration:
+                        curr_shear = None
+                        last_shear = None  # 标记 shear 已耗尽
+                else:
+                    curr_shear = None
 
                 # 从视频帧计算触觉特征
                 video_features = _compute_tactile_features_from_video(
@@ -1150,12 +1250,18 @@ class DaimonAdapter(BaseAdapter):
 
                 prev_deform_frame = curr_deform
 
-            elif len(cam_frames) > 0:
+            elif cam_gen is not None:
                 # fallback: 用普通相机做光流
-                fidx = min(i, len(cam_frames) - 1)
-                curr_cam = cam_frames[fidx]
-                if i > 0 and fidx > 0:
-                    prev_cam = cam_frames[fidx - 1]
+                try:
+                    new_cam = next(cam_gen)
+                    cam_hist = [cam_hist[1], new_cam]
+                    n_cam_read += 1
+                except StopIteration:
+                    pass
+                curr_cam = cam_hist[1]
+                prev_cam = cam_hist[0]
+                # n_cam_read > 1 对应原 fidx > 0，避免单帧视频被误算光流
+                if i > 0 and n_cam_read > 1 and prev_cam is not None and curr_cam is not None:
                     if HAS_CV2:
                         try:
                             prev_gray = cv2.cvtColor(prev_cam, cv2.COLOR_BGR2GRAY)
@@ -1203,8 +1309,8 @@ class DaimonAdapter(BaseAdapter):
                         abs(curr_area - prev_area) * 5.0), 4
                 )
 
-            frames_contact.append(tlabel_v2["contact"] > 0.5)
-            frames_slip.append(tlabel_v2["slip_event"] > 0.5)
+            is_contact_frame = tlabel_v2["contact"] > 0.5
+            is_slip_frame = tlabel_v2["slip_event"] > 0.5
 
             # 传感器特有数据
             state_m = _mask_placeholder(state)
@@ -1232,13 +1338,11 @@ class DaimonAdapter(BaseAdapter):
                 confidence=confidence,
                 sensor_specific=sensor_specific,
             )
-            tlabel_frames.append(frame)
+            # 阶段在产出前就地确定，不再等整段处理完回填。
+            # _PhaseTracker 与 _infer_phases 共用同一状态机，逐帧输出与批量回填一致。
+            frame.manipulation_phase = tracker.step(is_contact_frame, is_slip_frame)
             prev_tlabel_v2 = tlabel_v2
-
-        # 批量推断操作阶段
-        phases = _infer_phases(frames_contact, frames_slip)
-        for frame, phase in zip(tlabel_frames, phases):
-            frame.manipulation_phase = phase
+            yield frame
 
         sensor_info = {
             "type": "vision-based_tactile",
@@ -1276,13 +1380,99 @@ class DaimonAdapter(BaseAdapter):
             caps["slip_velocity"] = False
             caps["object_deformation"] = False
 
+        # 生成器收尾：把元数据交给 load() 组装 TLabelData。
+        # iter_frames() 调用方不传 _meta，元数据自然丢弃，不影响帧产出。
+        if _meta is not None:
+            _meta["sensor_info"] = sensor_info
+            _meta["episode_info"] = episode_info
+            _meta["capabilities"] = caps
+            _meta["sensor_id"] = "daimon_taclaw"
+            _meta["num_frames"] = num_frames
+            _meta["video_available"] = video_available
+            _meta["video_type"] = video_type
+
+    def load(self, file_path: str,
+             episode_index: Optional[int] = None,
+             max_frames: Optional[int] = None,
+             stream: bool = False,
+             **kwargs) -> TLabelData:
+        """
+        加载Daimon-Infinity parquet数据
+
+        参数:
+            file_path: parquet文件路径或episode目录路径
+            episode_index: 指定episode (默认加载第一个)
+            max_frames: 最大帧数
+            stream: v0.25.0 新增。True 时不保留完整 frames 列表（frames 为空），
+                    仅返回 aggregate_stats 中的统计量，用于超大 episode 的概览。
+                    需要逐帧数据请用 iter_frames()。
+
+        说明:
+            v0.25.0 起 load() 是 _iter_load() 的薄包装，输出与 v0.24.x 逐字段一致；
+            内部不再一次性把整段视频读进内存。
+        """
+        meta: Dict[str, Any] = {}
+        frames: List[TLabelFrame] = []
+        agg: Dict[str, Any] = {
+            "num_frames": 0,
+            "contact_ratio": 0.0,
+            "slip_ratio": 0.0,
+            "duration_s": 0.0,
+            "phase_counts": {},
+        }
+        n_contact = 0
+        n_slip = 0
+        first_ts = None
+        last_ts = None
+        phase_counts: Dict[str, int] = {}
+
+        for frame in self._iter_load(file_path, episode_index=episode_index,
+                                     max_frames=max_frames, _meta=meta, **kwargs):
+            agg["num_frames"] += 1
+            sv = getattr(frame, "schema_v2", None)
+            if sv is not None:
+                if bool(getattr(sv, "contact", False)):
+                    n_contact += 1
+                if bool(getattr(sv, "slip_event", False)):
+                    n_slip += 1
+            phase_counts[frame.manipulation_phase] = phase_counts.get(frame.manipulation_phase, 0) + 1
+            if first_ts is None:
+                first_ts = frame.timestamp_s
+            last_ts = frame.timestamp_s
+            if not stream:
+                frames.append(frame)
+
+        total = agg["num_frames"]
+        if total:
+            agg["contact_ratio"] = round(n_contact / total, 6)
+            agg["slip_ratio"] = round(n_slip / total, 6)
+            if first_ts is not None and last_ts is not None:
+                agg["duration_s"] = round(float(last_ts - first_ts), 6)
+        agg["phase_counts"] = phase_counts
+
         return TLabelData(
-            frames=tlabel_frames,
-            sensor_info=sensor_info,
-            episode_info=episode_info,
-            capabilities=caps,
-            sensor_id="daimon_taclaw",
+            frames=frames,
+            sensor_info=meta.get("sensor_info", {}),
+            episode_info=meta.get("episode_info", {}),
+            capabilities=meta.get("capabilities", self.get_capabilities()),
+            sensor_id=meta.get("sensor_id", "daimon_taclaw"),
+            streamed=stream,
+            aggregate_stats=agg,
         )
+
+    def iter_frames(self, file_path: str,
+                    meta_out: Optional[Dict[str, Any]] = None,
+                    **kwargs) -> Iterator[TLabelFrame]:
+        """流式逐帧产出 TLabelFrame（v0.25.0）
+
+        真正的逐帧路径：deformation / shear 视频以 ffmpeg/cv2 生成器配对消费，
+        峰值内存与单帧大小同阶，不随 episode 长度增长。这是处理 SharpaDex
+        这类工业级数据集的前提——单 season 302,020 帧 × 4 MB/帧 = 1.2 TB。
+
+        meta_out 传入可变 dict 时，产出结束后会写入 sensor_info /
+        episode_info / capabilities，供调用方拿到元数据。
+        """
+        yield from self._iter_load(file_path, _meta=meta_out, **kwargs)
 
     @staticmethod
     def _find_parquet(directory: Path) -> Path:

@@ -86,6 +86,24 @@ class DataAdapterBase(ABC):
         """
         pass
 
+    def iter_frames(self, file_path: str, **kwargs) -> Iterator[TLabelFrame]:
+        """流式逐帧产出 TLabelFrame（v0.25.0 新增）。
+
+        这是面向大数据集的低内存入口。默认实现基于 load()：先完整加载
+        再逐帧产出，语义正确但不节省内存。真正的流式能力由具体适配器
+        覆盖实现（例如 daimon 逐帧解码 FFV1 视频，不把整段视频读进内存）。
+
+        参数:
+            file_path: 数据文件路径
+            **kwargs: 与 load() 一致；适配器可额外解释 stream 等关键字
+
+        产出:
+            TLabelFrame — 与 load().frames 中的元素逐字段一致
+        """
+        data = self.load(file_path, **kwargs)
+        for frame in data.frames:
+            yield frame
+
     @abstractmethod
     def get_capabilities(self) -> Dict[str, bool]:
         """返回该数据源的14维能力声明
