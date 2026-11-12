@@ -105,8 +105,16 @@ def _array_stats(grid: Any) -> Dict[str, Any]:
     }
 
 
-def _region_of(cx: float, cy: float) -> str:
-    """把归一化质心映射到九宫格标签，如 middle_center / top_left"""
+def _grid_region(cx: float, cy: float) -> str:
+    """把归一化质心映射到阵列内部的九宫格标签，如 middle_center / top_left
+
+    注意这是**阵列内部的位置**，不是 Schema 的解剖区域。Schema 的
+    `contact_region` 枚举是 palmar/digital/lateral/proximal/distal/dorsal/other，
+    描述的是手部解剖分区。Grabette 是单指尖传感器，数据集没有文档化阵列
+    哪一侧朝向指尖、哪一侧朝近端，按九宫格硬映射成 distal/proximal 就是
+    凭空编造。所以这个标签只写进 `sensor_specific["grid_region"]` 作为
+    附加信息，`contact_region` 统一取 "palmar"（整个感应面都是指腹）。
+    """
     if cx < 1.0 / 3.0:
         xb = "left"
     elif cx > 2.0 / 3.0:
@@ -245,7 +253,8 @@ class GrabetteAdapter(DataAdapterBase):
     信号到 Schema 的映射：
       - 网格压力积分 → contact（总和超阈值）、force_magnitude（无量纲）
       - 压力加权重心 → contact_centroid（双阵列分别归一化后按受力加权合并）
-      - 九宫格分区 → contact_region
+      - 单指尖指腹 → contact_region 恒为 "palmar"（阵列内部九宫格位置另存
+        sensor_specific["grid_region"]，不冒充解剖分区）
       - 帧间质心位移 / 压力突变 → slip_event、slip_velocity
       - 帧间压力变化率 → object_deformation
       - 双阵列接触一致性 + is_lost → confidence
@@ -253,6 +262,10 @@ class GrabetteAdapter(DataAdapterBase):
     Compliance Level: L2。force_magnitude 是无量纲原始读数代理，不是牛顿值；
     数据集未提供标定系数，也不提供切向分量，因此 force_vector / torque_vector
     保持 None。
+
+    逐帧 compliance_level：有接触时 L2；无接触帧没有 force_magnitude，而 Schema
+    硬约束禁止此时声明 L2，故降为 L1（与 touchd / demo 的处理一致）。adapter 的
+    capabilities 仍声明 default_compliance_level = L2。
 
     参考:
       - 数据集: https://huggingface.co/datasets/CarolinePascal/grabette-tactile-full-synced
@@ -373,6 +386,10 @@ class GrabetteAdapter(DataAdapterBase):
         )
 
         if not is_contact:
+            # 无接触帧没有 force_magnitude。Schema 校验规则是
+            # "level_num >= 2 必须 force_magnitude 非 None"，所以这里不能
+            # 继续挂着 L2，降为 L1。有接触帧仍是 L2。
+            schema.compliance_level = "L1"
             schema.confidence = 0.5 if is_lost else 0.95
             return schema
 
@@ -385,7 +402,9 @@ class GrabetteAdapter(DataAdapterBase):
         cx = sum(c[0] * w for c, w in weighted) / total
         cy = sum(c[1] * w for c, w in weighted) / total
         schema.contact_centroid = [round(float(cx), 4), round(float(cy), 4)]
-        schema.contact_region = _region_of(cx, cy)
+        # 单指尖传感器，整个感应面都是指腹；阵列内部的九宫格位置写进
+        # sensor_specific["grid_region"]，不冒充解剖分区
+        schema.contact_region = "palmar"
 
         # slip / 形变：需要上一帧
         prev_centroid = raw_frame_data.get("prev_centroid")
@@ -551,6 +570,11 @@ class GrabetteAdapter(DataAdapterBase):
                         "task": task_desc,
                         "episode_index": int(eps[k]),
                         "is_lost": bool(lost[k]),
+                        # 阵列内部九宫格位置（不是 Schema 的解剖区域）
+                        "grid_region": (
+                            _grid_region(*schema.contact_centroid)
+                            if schema.contact_centroid else None
+                        ),
                         "sensor_1_total": round(s1["total"], 4),
                         "sensor_2_total": round(s2["total"], 4),
                         "sensor_1_active_taxels": s1["active"],

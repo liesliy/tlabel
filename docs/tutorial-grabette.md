@@ -145,7 +145,9 @@ Schema 里 `manipulation_phase` 字段没有 enum 强约束，下游别假设只
 | 问题 | 表现 | 修正方法 |
 |------|------|----------|
 | 任务描述是数字 | `task` 显示 `0` | 读 `meta/tasks.parquet` 时没处理 pandas index，升级到 v0.25.0+ |
-| 接触区域总是同一侧 | `contact_region` 只有 `*_left` | 单个 episode 内可能是真实物理；先跑全量再判断 |
+| 接触位置总是同一格 | `sensor_specific["grid_region"]` 只有 `*_left` | 单个 episode 内可能是真实物理；先跑全量再判断 |
+| 想知道接触落在阵列哪一块 | — | 看 `sensor_specific["grid_region"]`（九宫格）；`contact_region` 是解剖分区，恒为 `palmar` |
+| 有些帧 compliance_level 是 L1 | 无接触帧 | 正常。L2 要求 `force_magnitude` 非 None，无接触帧降 L1 |
 | 接触率异常高 | 几乎每帧都 contact | 检查是否误用了减基线逻辑；Grabette 基线就是 0 |
 | 找不到 parquet | `FileNotFoundError` | 传目录时适配器只找 `data/**/*.parquet` 并排除 `meta/` |
 
@@ -198,7 +200,7 @@ for ep in range(48):
           f"({contacts / max(len(data.frames), 1):.0%})")
 ```
 
-实测全量 19,353 帧、48 个 episode，峰值内存 80.7 MB，耗时约 49 秒。
+实测全量 19,353 帧、48 个 episode：`load()` 峰值 80.7 MB / 约 49 秒，`iter_frames()` 峰值 33.9 MB / 约 43 秒。
 
 ### 流式处理（内存恒定）
 
@@ -231,9 +233,17 @@ for f in data.frames[:10]:
 
 A: 不用。适配器只读 `meta/` 和 `data/`。从 HuggingFace 拉数据时用 `--include "meta/*" "data/*"` 跳过 `videos/`，239.7 MB 会变成 1.7 MB。
 
-### Q: 为什么 compliance_level 是 L2 不是 L1？
+### Q: 为什么有些帧是 L1、有些是 L2？
 
-A: L1 要求只做接触判定，不输出任何力相关量。Grabette 有完整的压力阵列，可以算出网格压力积分（`force_magnitude`）和质心位移速度（`slip_velocity`），所以是 L2。但因为没有标定系数、拿不到牛顿值和 mm/s，够不上 L3。
+A: 按接触状态逐帧判定。有接触时能算出网格压力积分（`force_magnitude`）和质心位移速度（`slip_velocity`），是 L2；无接触帧没有力可报，而 Schema 规定 L2 必须 `force_magnitude` 非 `None`，所以降 L1。全量 19,353 帧里 L2 占 7,652 帧、L1 占 11,701 帧。
+
+够不上 L3 是因为没有标定系数，拿不到牛顿值和 mm/s。
+
+### Q: `contact_region` 为什么永远是 `palmar`？
+
+A: 因为它是**解剖分区**，不是阵列位置。Schema 的合法值是 `palmar / digital / lateral / proximal / distal / dorsal / other`。Grabette 是单指尖传感器，整个感应面都是指腹，所以恒取 `palmar`。数据集没文档化阵列哪一侧朝指尖、哪一侧朝近端，硬映射成 `distal` / `proximal` 属于编造。
+
+想知道接触落在阵列的哪一块，看 `sensor_specific["grid_region"]`，值是九宫格（`middle_center` / `top_left` / `bottom_right` 等）。
 
 ### Q: 能算 force_vector 吗？
 

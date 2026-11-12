@@ -195,7 +195,7 @@
 |---|---|---|
 | contact | ✓ | 网格压力 > 阈值 |
 | contact_centroid | ✓ | 压力加权重心，双阵列分别归一化后合并 |
-| contact_region | ✓ | 阵列分区（左中右 / 上中下） |
+| contact_region | ✓ | 恒为 `palmar`（单指尖指腹）；阵列内部九宫格位置另存 `sensor_specific["grid_region"]` |
 | force_magnitude | ✓ | 网格压力积分（无量纲，因无标定系数） |
 | force_vector | ✗ | 只有法向单轴，无切向分量 |
 | torque_vector | ✗ | 无多轴力、无 taxel 间距 |
@@ -212,9 +212,9 @@
 
 - [x] `tlabel convert --adapter grabette <path>` 能跑通 48 个 episode — **19,353/19,353 帧，0 失败**
 - [x] 输出 JSON 通过 `tlabel validate` 自校验 — **0 错误 0 警告**
-- [x] `compliance_level` 判定为 L2，不是 L1 也不是 L3 — **19,353/19,353 帧全 L2**
+- [x] `compliance_level` 判定为 L2，不是 L1 也不是 L3 — **有接触 7,652 帧全 L2；无接触 11,701 帧降 L1（L2 要求 `force_magnitude` 非 None）**。19,353 帧过 `TLabelSchemaV2.validate()` 0 失败
 - [x] `force_magnitude` 明确标注为「无量纲原始读数」，**不能填 0 或虚构牛顿值**（照 `xela.py` 第 24-27 行的做法）
-- [x] 处理全程峰值内存 < 500 MB（验证第 1 步在无视频场景下也生效） — **80.7 MB**
+- [x] 处理全程峰值内存 < 500 MB（验证第 1 步在无视频场景下也生效） — **`iter_frames()` 33.9 MB / `load()` 80.7 MB**
 
 > CLI 实际没有 `convert` 子命令，用 `tlabel export <path> <out> -f json -a grabette --episode-index N`。
 
@@ -222,13 +222,15 @@
 
 | 项 | 值 |
 |---|---|
-| 全量 48 个 episode | 19,353 帧，0 失败，49.2 秒 |
-| 峰值内存（tracemalloc） | 80.7 MB |
-| `compliance_level` | L2 × 19,353 |
+| 全量 48 个 episode | 19,353 帧，0 失败，`iter_frames()` 42.6 秒 / `load()` 49.2 秒 |
+| 峰值内存（tracemalloc） | `iter_frames()` 33.9 MB / `load()` 80.7 MB |
+| `compliance_level` | L2 × 7,652（有接触）+ L1 × 11,701（无接触） |
 | `manipulation_phase` | idle 11,492 / stable_contact 7,126 / slip 470 / re_contact 156 / release 55 / initial_contact 54 |
-| `contact_region` | 九宫格 9 种全部出现（middle_center 3,458 / middle_left 1,683 / bottom_center 870 / bottom_left 797 / top_center 409 / middle_right 355 / top_left 30 / bottom_right 27 / top_right 23） |
-| 单 episode 导出 | 330 帧 → 804.9 KB JSON，`tlabel validate` 通过 |
-| 测试 | 562 passed / 4 skipped（新增 57 个） |
+| `contact_region` | 恒为 `palmar` × 7,652（全量 0 个非法枚举值） |
+| `sensor_specific["grid_region"]` | 九宫格 9 种全部出现（middle_center 3,455 / middle_left 1,634 / bottom_center 871 / bottom_left 837 / top_center 411 / middle_right 352 / top_left 39 / bottom_right 28 / top_right 25） |
+| Schema 自校验 | 19,353/19,353 帧 `validate()` 通过，0 失败 |
+| 单 episode 导出 | 330 帧 → 814.8 KB JSON，`tlabel validate` 通过（0 错误 0 警告） |
+| 测试 | 565 passed / 4 skipped（新增 60 个） |
 
 复现：
 
@@ -249,7 +251,10 @@ for ep in range(48):
 - `meta/tasks.parquet` 的任务文本是 **pandas index** 而不是普通列（parquet 的 pandas metadata 里 `index_columns: ["task"]`）。只查 `df.columns` 会退化成 `{task_index: task_index}`，任务描述变成数字 `0`。必须查 `df.index.name`。
 - `episode_index` 列**单调不减**，指定第 N 个 episode 时可以提前终止扫描。不做这个优化时 48 个 episode 要重扫全表 48 遍（78 秒），做了之后 49 秒。
 - 基线**恒为 0**（未接触全零），不是中位数基线，不需要减基线。
-- 两个阵列归一化后的质心分布不同（episode 0 里 sensor_1 的 y 在 0~1 跳、sensor_2 的 y 恒在 0.67~0.82），合并后 `contact_region` 在单个 episode 内可能只落在一两格。跑全量后九宫格都会出现，不要看到单个 episode 只有 left 就以为有 bug。
+- 两个阵列归一化后的质心分布不同（episode 0 里 sensor_1 的 y 在 0~1 跳、sensor_2 的 y 恒在 0.67~0.82），合并后九宫格位置在单个 episode 内可能只落在一两格。跑全量后九宫格都会出现，不要看到单个 episode 只有 left 就以为有 bug。
+- **`contact_region` 不能用九宫格名字**。`VALID_CONTACT_REGIONS` 只有 `palmar / digital / lateral / proximal / distal / dorsal / other`（手部解剖分区）。Grabette 是单指尖传感器，数据集没文档化阵列哪一侧朝指尖，硬映射成 `distal` / `proximal` 就是编造。`contact_region` 恒取 `palmar`，九宫格进 `sensor_specific["grid_region"]`。
+- **`tlabel validate` 不调用 `TLabelSchemaV2.validate()`**，所以非法枚举值、`force_magnitude` 缺失这类语义违规它查不出来。适配器自测里必须直接调 `schema.validate()`（返回 `(ok, errors)`）。
+- **无接触帧不能挂 L2**。L2 定义要求 `force_magnitude` 非 `None`，无接触帧没有力可报，必须降 L1（`touchd` / `demo` 都是这么处理的）。全量 19,353 帧里有 11,701 帧属于这种情况，占 60%。
 
 ---
 

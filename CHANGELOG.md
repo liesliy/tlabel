@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 这是处理工业级数据集的前置条件。单个 season 302,020 帧 × 4.03 MB/帧 = 1.2 TB，全量 3,240 万帧 = 130 TB，靠加内存解决不了。
 
-同时新增 **Grabette 适配器**（`grabette`）：LeRobot v3.0 格式的双阵列纯压力触觉，6×6 + 4×8 不对称尺寸，48 个 episode / 19,353 帧，L2。
+同时新增 **Grabette 适配器**（`grabette`）：LeRobot v3.0 格式的双阵列纯压力触觉，6×6 + 4×8 不对称尺寸，48 个 episode / 19,353 帧，有接触帧 L2。
 
 ### Added
 
@@ -43,6 +43,8 @@ v0.24.2 的 2.6 GB 全部来自视频帧数组（30,000 × 96×72×3×4 B ≈ 2.
 
 - **ffmpeg 子进程泄漏**：生成器被提前 `break` 或抛异常时，`_iter_ffv1_frames` 在 `finally` 里依次 close stdout → `terminate()` → 5 秒超时后 `kill()` 三级兜底。
 - **`meta/tasks.parquet` 任务描述读成数字**：LeRobot v3.0 把任务文本写成 pandas index（parquet 的 pandas metadata 里 `index_columns: ["task"]`），`df.columns` 里只有 `task_index`。只查列名会退化成 `{task_index: task_index}`，任务描述变成 `0`。`_load_tasks` 改为依次查列名、再查 index 名。
+- **`contact_region` 输出非法枚举值**：Grabette 适配器最初把九宫格位置（`middle_left` / `bottom_center` 等）直接写进 `contact_region`，而 `VALID_CONTACT_REGIONS` 只有 `palmar / digital / lateral / proximal / distal / dorsal / other`。`tlabel validate` 此前不调用 `TLabelSchemaV2.validate()`，所以这个违规一路溜过 CLI 校验。现改为 `contact_region` 恒取 `palmar`，九宫格位置降级到 `sensor_specific["grid_region"]`。
+- **无接触帧错标 L2**：无接触帧 `force_magnitude` 为 `None`，但适配器仍标 `compliance_level = "L2"`，违反 Schema 校验规则「`level_num >= 2` 必须 `force_magnitude` 非 `None`」。全量 19,353 帧里有 11,701 帧受影响。现改为无接触帧降 L1，有接触帧保持 L2。
 
 ### Datasets
 
@@ -52,11 +54,16 @@ Grabette 实测（`CarolinePascal/grabette-tactile-full-synced`，Apache-2.0，�
 | --- | --- |
 | 数据集总大小 | 239.7 MB（其中视频 238.0 MB，适配器完全不读） |
 | 适配器实际需要 | 1.7 MB（`meta/` + `data/`） |
-| 处理耗时 | 49.2 s（48 个 episode 全量） |
-| 峰值内存 | 80.7 MB |
-| `compliance_level` | L2（19,353/19,353 帧） |
+| 处理耗时 | `iter_frames()` 42.6 s / `load()` 49.2 s（48 个 episode 全量） |
+| 峰值内存 | `iter_frames()` 33.9 MB / `load()` 80.7 MB |
+| `compliance_level` | L2 × 7,652（有接触）+ L1 × 11,701（无接触） |
 | `manipulation_phase` | idle 11,492 / stable_contact 7,126 / slip 470 / re_contact 156 / release 55 / initial_contact 54 |
-| `contact_region` | 九宫格全部出现（middle_center 3,458 / middle_left 1,683 / bottom_center 870 …） |
+| `contact_region` | 恒为 `palmar`（单指尖指腹，全量 7,652 个接触帧） |
+| `sensor_specific["grid_region"]` | 九宫格 9 种全部出现（middle_center 3,455 / middle_left 1,634 / bottom_center 871 / bottom_left 837 / top_center 411 / middle_right 352 / top_left 39 / bottom_right 28 / top_right 25） |
+
+**逐帧 `compliance_level` 按接触状态取值**：L2 的定义要求 `force_magnitude` 非 `None`，无接触帧没有力可报，因此降为 L1（与 `touchd` / `demo` 的处理一致）。适配器 `capabilities` 仍声明 `default_compliance_level = "L2"`。全量 19,353 帧过 `TLabelSchemaV2.validate()` **0 失败**。
+
+**`contact_region` 用 Schema 枚举，不用九宫格**：`VALID_CONTACT_REGIONS` 是 `palmar / digital / lateral / proximal / distal / dorsal / other`（手部解剖分区）。Grabette 是单指尖传感器，数据集未文档化阵列哪一侧朝指尖、哪一侧朝近端，把九宫格硬映射成 `distal` / `proximal` 属于编造。故 `contact_region` 恒取 `palmar`，阵列内部位置写进 `sensor_specific["grid_region"]`。
 
 **单位说明**：数据集未文档化触觉读数物理单位，也未提供标定系数。`force_magnitude` 是网格压力积分（无量纲原始读数），`slip_velocity` 是归一化坐标/秒，`object_deformation` 是无量纲压力变化率。不填 0、不虚构牛顿值；`sensor_specific` 保留 `raw_grid_1` / `raw_grid_2` 原始读数供下游自行换算。`force_vector` / `torque_vector` 恒为 `None`——单轴法向压力拿不到切向分量。
 
@@ -72,7 +79,7 @@ Grabette 实测（`CarolinePascal/grabette-tactile-full-synced`，Apache-2.0，�
 
 ### Tests
 
-- 562 passed, 4 skipped。其中 57 个是 `tests/test_adapter_grabette.py` 新增（双阵列统计、九宫格区域、L2 判定、单位不虚构、slip 阈值、流式与 `load()` 一致、pandas index 任务描述）。
+- 565 passed, 4 skipped。其中 60 个是 `tests/test_adapter_grabette.py` 新增（双阵列统计、九宫格位置、`contact_region` 枚举合法性、逐帧 L1/L2 判定、单位不虚构、slip 阈值、流式与 `load()` 一致、pandas index 任务描述）。
 - Windows 下需设 `PYTHONUTF8=1`：`test_json_export` 因 `open()` 未指定 encoding 在 GBK 环境下读 UTF-8 JSON 失败，是既有环境问题，与本次改动无关。
 
 ---

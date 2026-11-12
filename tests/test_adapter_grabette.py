@@ -23,7 +23,7 @@ import pytest
 
 from tlabel.adapters.base import DataAdapterBase
 from tlabel.core.registry import get_adapter, list_builtin_adapters
-from tlabel.core.schema import TLabelSchemaV2
+from tlabel.core.schema import VALID_CONTACT_REGIONS, TLabelSchemaV2
 
 pq = pytest.importorskip("pyarrow.parquet")
 pa = pytest.importorskip("pyarrow")
@@ -31,7 +31,7 @@ pa = pytest.importorskip("pyarrow")
 from tlabel.adapters.grabette import (  # noqa: E402
     GrabetteAdapter,
     _array_stats,
-    _region_of,
+    _grid_region,
 )
 
 S1_KEY = "observation.tactile.right_sensor_1"
@@ -191,10 +191,10 @@ class TestArrayStats:
 
 
 # =============================================================================
-# 单元：_region_of
+# 单元：_grid_region
 # =============================================================================
 
-class TestRegionOf:
+class TestGridRegion:
     @pytest.mark.parametrize("cx,cy,expected", [
         (0.1, 0.1, "top_left"),
         (0.5, 0.1, "top_center"),
@@ -207,12 +207,12 @@ class TestRegionOf:
         (0.9, 0.9, "bottom_right"),
     ])
     def test_nine_cells(self, cx, cy, expected):
-        assert _region_of(cx, cy) == expected
+        assert _grid_region(cx, cy) == expected
 
     def test_boundary_goes_to_center(self):
         """1/3 和 2/3 的分界点归 middle/center"""
-        assert _region_of(1 / 3, 1 / 3) == "middle_center"
-        assert _region_of(2 / 3, 2 / 3) == "middle_center"
+        assert _grid_region(1 / 3, 1 / 3) == "middle_center"
+        assert _grid_region(2 / 3, 2 / 3) == "middle_center"
 
 
 # =============================================================================
@@ -229,7 +229,34 @@ class TestExtractSchema:
         assert s.force_magnitude is None
         assert s.contact_centroid is None
         assert s.contact_region is None
-        assert s.compliance_level == "L2"
+        # 无接触帧没有 force_magnitude，不能声明 L2
+        assert s.compliance_level == "L1"
+
+    def test_contact_region_is_schema_enum(self, grabette_adapter):
+        """contact_region 必须是 Schema 枚举值，不能拿九宫格名字冒充
+
+        单指尖传感器整个感应面都是指腹，所以固定 palmar；阵列内部位置
+        另存 sensor_specific["grid_region"]。
+        """
+        s = grabette_adapter.extract_schema({
+            "grid_1": _grid((6, 6), peak_at=(2, 1), peak_val=500),
+            "grid_2": _grid((4, 8), peak_at=(1, 2), peak_val=800),
+        })
+        assert s.contact_region == "palmar"
+        assert s.contact_region in VALID_CONTACT_REGIONS
+
+    def test_extracted_schema_passes_validate(self, grabette_adapter):
+        """extract_schema 的输出要能过 Schema 自身的校验（含枚举检查）"""
+        s = grabette_adapter.extract_schema({
+            "grid_1": _grid((6, 6), peak_at=(2, 1), peak_val=500),
+            "grid_2": _grid((4, 8), peak_at=(1, 2), peak_val=800),
+            "prev_centroid": [0.2528, 0.3590],
+            "prev_total": 1300.0,
+            "dt": 0.02,
+        })
+        ok, errors = s.validate()
+        assert ok is True
+        assert errors == []
 
     def test_contact_sets_force_magnitude(self, grabette_adapter):
         s = grabette_adapter.extract_schema({
@@ -376,9 +403,19 @@ class TestLoad:
         assert ei["num_frames"] == 4
         assert ei["total_episodes"] == 2
 
-    def test_all_frames_are_l2(self, grabette_adapter, dataset):
+    def test_compliance_level_by_contact(self, grabette_adapter, dataset):
+        """有接触 L2，无接触 L1；且每帧都要过 Schema 校验"""
         data = grabette_adapter.load(str(dataset))
-        assert all(f.schema_v2.compliance_level == "L2" for f in data.frames)
+        for f in data.frames:
+            s = f.schema_v2
+            if s.contact:
+                assert s.compliance_level == "L2"
+                assert s.force_magnitude is not None
+            else:
+                assert s.compliance_level == "L1"
+                assert s.force_magnitude is None
+            ok, errors = s.validate()
+            assert ok, errors
 
     def test_raw_grids_preserved(self, grabette_adapter, dataset):
         """原始读数必须保留，便于下游自行换标定系数"""
@@ -395,6 +432,15 @@ class TestLoad:
         assert ss["sensor_2_total"] == pytest.approx(800.0)
         assert ss["sensor_1_active_taxels"] == 1
         assert ss["sensor_2_active_taxels"] == 1
+
+    def test_sensor_specific_has_grid_region(self, grabette_adapter, dataset):
+        """阵列内部九宫格位置进 sensor_specific，不占 contact_region"""
+        data = grabette_adapter.load(str(dataset))
+        # frames[0] 全零无接触 → 没有质心也就没有九宫格
+        assert data.frames[0].sensor_specific["grid_region"] is None
+        # frames[1] 合并质心约 (0.2528, 0.3590) → x 偏左、y 居中
+        assert data.frames[1].sensor_specific["grid_region"] == "middle_left"
+        assert data.frames[1].schema_v2.contact_region == "palmar"
 
     def test_manipulation_phase_progression(self, grabette_adapter, dataset):
         data = grabette_adapter.load(str(dataset))
@@ -495,4 +541,6 @@ class TestExport:
         assert payload["format"] == "tlabel_schema_v2"
         assert len(payload["frames"]) == 4
         for f in payload["frames"]:
-            assert f["schema_v2"]["compliance_level"] == "L2"
+            sv = f["schema_v2"]
+            expected = "L2" if sv["contact"] else "L1"
+            assert sv["compliance_level"] == expected
