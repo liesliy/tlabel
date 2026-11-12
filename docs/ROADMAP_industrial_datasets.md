@@ -179,7 +179,7 @@
 | 触觉 | parquet 里两个 int16 网格：`observation.tactile.right_sensor_1` **6×6**、`observation.tactile.right_sensor_2` **4×8** |
 | 其他模态 | 2 路 RGB `right_cam0`/`right_cam1` 960×720、8 维 action、`is_lost` 标志 |
 | 许可证 | Apache-2.0 |
-| 体积 | 估计 < 5 GB |
+| 体积 | **实测 239.7 MB**（9 个文件）；其中视频 238.0 MB，适配器只需要 `meta/` + `data/` 共 **1.7 MB** |
 
 **做什么**
 
@@ -210,16 +210,46 @@
 
 **做完的标志**
 
-- [ ] `tlabel convert --adapter grabette <path>` 能跑通 48 个 episode
-- [ ] 输出 JSON 通过 `tlabel validate` 自校验
-- [ ] `compliance_level` 判定为 L2，不是 L1 也不是 L3
-- [ ] `force_magnitude` 明确标注为「无量纲原始读数」，**不能填 0 或虚构牛顿值**（照 `xela.py` 第 24-27 行的做法）
-- [ ] 处理全程峰值内存 < 500 MB（验证第 1 步在无视频场景下也生效）
+- [x] `tlabel convert --adapter grabette <path>` 能跑通 48 个 episode — **19,353/19,353 帧，0 失败**
+- [x] 输出 JSON 通过 `tlabel validate` 自校验 — **0 错误 0 警告**
+- [x] `compliance_level` 判定为 L2，不是 L1 也不是 L3 — **19,353/19,353 帧全 L2**
+- [x] `force_magnitude` 明确标注为「无量纲原始读数」，**不能填 0 或虚构牛顿值**（照 `xela.py` 第 24-27 行的做法）
+- [x] 处理全程峰值内存 < 500 MB（验证第 1 步在无视频场景下也生效） — **80.7 MB**
 
-**坑**
+> CLI 实际没有 `convert` 子命令，用 `tlabel export <path> <out> -f json -a grabette --episode-index N`。
 
-- 两个传感器尺寸不同，如果直接 flatten 再 reshape 会错位
-- `is_lost` 为 true 的帧要跳过还是标 NaN，得先定规则并写进文档（建议：标 NaN + 记 `confidence` 降低，不丢帧，因为丢帧会破坏时序）
+**实测（2026-11-12）**
+
+| 项 | 值 |
+|---|---|
+| 全量 48 个 episode | 19,353 帧，0 失败，49.2 秒 |
+| 峰值内存（tracemalloc） | 80.7 MB |
+| `compliance_level` | L2 × 19,353 |
+| `manipulation_phase` | idle 11,492 / stable_contact 7,126 / slip 470 / re_contact 156 / release 55 / initial_contact 54 |
+| `contact_region` | 九宫格 9 种全部出现（middle_center 3,458 / middle_left 1,683 / bottom_center 870 / bottom_left 797 / top_center 409 / middle_right 355 / top_left 30 / bottom_right 27 / top_right 23） |
+| 单 episode 导出 | 330 帧 → 804.9 KB JSON，`tlabel validate` 通过 |
+| 测试 | 562 passed / 4 skipped（新增 57 个） |
+
+复现：
+
+```bash
+pip install tlabel[grabette]
+
+python -c "
+from tlabel.adapters.grabette import GrabetteAdapter
+ad = GrabetteAdapter()
+for ep in range(48):
+    d = ad.load('path/to/grabette-tactile-full-synced/', episode_index=ep)
+    print(ep, len(d.frames))
+"
+```
+
+**坑（实测补充）**
+
+- `meta/tasks.parquet` 的任务文本是 **pandas index** 而不是普通列（parquet 的 pandas metadata 里 `index_columns: ["task"]`）。只查 `df.columns` 会退化成 `{task_index: task_index}`，任务描述变成数字 `0`。必须查 `df.index.name`。
+- `episode_index` 列**单调不减**，指定第 N 个 episode 时可以提前终止扫描。不做这个优化时 48 个 episode 要重扫全表 48 遍（78 秒），做了之后 49 秒。
+- 基线**恒为 0**（未接触全零），不是中位数基线，不需要减基线。
+- 两个阵列归一化后的质心分布不同（episode 0 里 sensor_1 的 y 在 0~1 跳、sensor_2 的 y 恒在 0.67~0.82），合并后 `contact_region` 在单个 episode 内可能只落在一两格。跑全量后九宫格都会出现，不要看到单个 episode 只有 left 就以为有 bug。
 
 ---
 

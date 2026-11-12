@@ -6,12 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.25.0] - 2026-11-12
 
-流式改造：适配器不再把整段触觉视频读进内存。**不是 breaking change**——`load()` 的签名与返回值逐字段不变，新增参数全部带默认值，12 个适配器的现有调用代码一行都不用改。
+流式改造：适配器不再把整段触觉视频读进内存。**不是 breaking change**——`load()` 的签名与返回值逐字段不变，新增参数全部带默认值，原有 12 个适配器的现有调用代码一行都不用改。
 
 这是处理工业级数据集的前置条件。单个 season 302,020 帧 × 4.03 MB/帧 = 1.2 TB，全量 3,240 万帧 = 130 TB，靠加内存解决不了。
 
+同时新增 **Grabette 适配器**（`grabette`）：LeRobot v3.0 格式的双阵列纯压力触觉，6×6 + 4×8 不对称尺寸，48 个 episode / 19,353 帧，L2。
+
 ### Added
 
+- **`GrabetteAdapter`（`tlabel/adapters/grabette.py`）**：Grabette 双阵列压力阵列适配器，读 LeRobot v3.0 的 `data/**/*.parquet`。触觉在 parquet 里，无视频解码，只依赖 `pyarrow`。新增 extra `tlabel[grabette]`。
 - **`DataAdapterBase.iter_frames(file_path, **kwargs) -> Iterator[TLabelFrame]`**：流式入口。基类默认实现基于 `load()`（语义正确但不省内存），具体适配器可覆盖为真流式。
 - **`TLabelData.streamed` / `TLabelData.aggregate_stats`**：标记"这批数据不是完整帧序列"，并提供 `num_frames` / `contact_ratio` / `slip_ratio` / `duration_s` / `phase_counts`。`streamed=True` 时 `num_frames` 与 `duration_s` 改读 `aggregate_stats`，避免下游把 `frames=[]` 误判成空数据。
 - **`DaimonDatasetAdapter.iter_frames()`**：真流式实现，deformation / shear 两路视频以 ffmpeg / cv2 生成器配对消费，内存与单帧大小同阶。
@@ -39,6 +42,25 @@ v0.24.2 的 2.6 GB 全部来自视频帧数组（30,000 × 96×72×3×4 B ≈ 2.
 ### Fixed
 
 - **ffmpeg 子进程泄漏**：生成器被提前 `break` 或抛异常时，`_iter_ffv1_frames` 在 `finally` 里依次 close stdout → `terminate()` → 5 秒超时后 `kill()` 三级兜底。
+- **`meta/tasks.parquet` 任务描述读成数字**：LeRobot v3.0 把任务文本写成 pandas index（parquet 的 pandas metadata 里 `index_columns: ["task"]`），`df.columns` 里只有 `task_index`。只查列名会退化成 `{task_index: task_index}`，任务描述变成 `0`。`_load_tasks` 改为依次查列名、再查 index 名。
+
+### Datasets
+
+Grabette 实测（`CarolinePascal/grabette-tactile-full-synced`，Apache-2.0，全量 48 个 episode / 19,353 帧）：
+
+| 项 | 值 |
+| --- | --- |
+| 数据集总大小 | 239.7 MB（其中视频 238.0 MB，适配器完全不读） |
+| 适配器实际需要 | 1.7 MB（`meta/` + `data/`） |
+| 处理耗时 | 49.2 s（48 个 episode 全量） |
+| 峰值内存 | 80.7 MB |
+| `compliance_level` | L2（19,353/19,353 帧） |
+| `manipulation_phase` | idle 11,492 / stable_contact 7,126 / slip 470 / re_contact 156 / release 55 / initial_contact 54 |
+| `contact_region` | 九宫格全部出现（middle_center 3,458 / middle_left 1,683 / bottom_center 870 …） |
+
+**单位说明**：数据集未文档化触觉读数物理单位，也未提供标定系数。`force_magnitude` 是网格压力积分（无量纲原始读数），`slip_velocity` 是归一化坐标/秒，`object_deformation` 是无量纲压力变化率。不填 0、不虚构牛顿值；`sensor_specific` 保留 `raw_grid_1` / `raw_grid_2` 原始读数供下游自行换算。`force_vector` / `torque_vector` 恒为 `None`——单轴法向压力拿不到切向分量。
+
+**slip 阈值**来自该数据集 7,596 个"接触→接触"帧对的实测分布：质心位移 p95 = 0.053、压力相对变化 p95 = 0.22，取整为 `0.05` / `0.25`。换传感器应重新标定，两个阈值都可通过 kwargs 覆盖。
 
 ### Compatibility
 
@@ -50,7 +72,8 @@ v0.24.2 的 2.6 GB 全部来自视频帧数组（30,000 × 96×72×3×4 B ≈ 2.
 
 ### Tests
 
-- 505 passed, 4 skipped。Windows 下需设 `PYTHONUTF8=1`：`test_json_export` 因 `open()` 未指定 encoding 在 GBK 环境下读 UTF-8 JSON 失败，是既有环境问题，与本次改动无关。
+- 562 passed, 4 skipped。其中 57 个是 `tests/test_adapter_grabette.py` 新增（双阵列统计、九宫格区域、L2 判定、单位不虚构、slip 阈值、流式与 `load()` 一致、pandas index 任务描述）。
+- Windows 下需设 `PYTHONUTF8=1`：`test_json_export` 因 `open()` 未指定 encoding 在 GBK 环境下读 UTF-8 JSON 失败，是既有环境问题，与本次改动无关。
 
 ---
 

@@ -36,6 +36,7 @@ AVAILABLE_ADAPTERS = {
     "syntouch":      "SynTouch BioTac (.h5 / .csv / .mat)",
     "xela":          "XELA uSkin / UniTac-NV dataset (.csv)",
     "tashan_ts_f_a": "RoboMIND Tashan TS-F-A tactile (.hdf5 / .h5)",
+    "grabette":      "Grabette dual-array tactile (LeRobot v3.0 .parquet)",
     # 传感器适配器 (SensorAdapterBase)
     "paxini_gen3":   "PaXini GEN3 realtime (SDK / .paxini)",
     "daimon_dm_tac": "Daimon DM-Tac realtime (USB / UVC)",

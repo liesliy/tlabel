@@ -34,6 +34,7 @@ _ADAPTER_MODULES = {
     "syntouch":      ("tlabel.adapters.syntouch",      "SynTouchBioTacAdapter"),
     "xela":          ("tlabel.adapters.xela",          "XelaUskinAdapter"),
     "tashan_ts_f_a": ("tlabel.adapters.tashan_ts_f_a", "TashanTsFAAdapter"),
+    "grabette":      ("tlabel.adapters.grabette",      "GrabetteAdapter"),
 }
 
 # 社区适配器 entry_point group name
