@@ -4,6 +4,56 @@ All notable changes to the TLabel project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.25.0] - 2026-11-12
+
+流式改造：适配器不再把整段触觉视频读进内存。**不是 breaking change**——`load()` 的签名与返回值逐字段不变，新增参数全部带默认值，12 个适配器的现有调用代码一行都不用改。
+
+这是处理工业级数据集的前置条件。单个 season 302,020 帧 × 4.03 MB/帧 = 1.2 TB，全量 3,240 万帧 = 130 TB，靠加内存解决不了。
+
+### Added
+
+- **`DataAdapterBase.iter_frames(file_path, **kwargs) -> Iterator[TLabelFrame]`**：流式入口。基类默认实现基于 `load()`（语义正确但不省内存），具体适配器可覆盖为真流式。
+- **`TLabelData.streamed` / `TLabelData.aggregate_stats`**：标记"这批数据不是完整帧序列"，并提供 `num_frames` / `contact_ratio` / `slip_ratio` / `duration_s` / `phase_counts`。`streamed=True` 时 `num_frames` 与 `duration_s` 改读 `aggregate_stats`，避免下游把 `frames=[]` 误判成空数据。
+- **`DaimonDatasetAdapter.iter_frames()`**：真流式实现，deformation / shear 两路视频以 ffmpeg / cv2 生成器配对消费，内存与单帧大小同阶。
+- **`DaimonDatasetAdapter.load(stream=True)`**：只算聚合统计量，不保留帧列表。
+
+### Changed
+
+- `_extract_video_frames` / `_extract_ffv1_frames_streaming` 拆出真生成器 `_iter_video_frames` / `_iter_ffv1_frames`，旧函数保留为 `list()` 薄包装，既有调用方不受影响。后者的名字此前名不副实：叫 streaming，返回的却是 `List`，整段视频照样全部进内存。
+- `_infer_phases` 抽出 `_PhaseTracker` 状态机类，改为逐帧在线推进，不再等整段处理完回填。`_infer_phases` 本身保留，改为驱动同一个 tracker，两者输出保证一致。
+- `load()` 改为 `_iter_load()` 的薄包装。
+
+### Performance
+
+30,000 帧 episode（96×72 gbrp16le 触觉视频），`tracemalloc` 峰值：
+
+| 路径 | 峰值内存 | 耗时 |
+| --- | --- | --- |
+| v0.24.2 `load()` | 2,625 MB | 142.5 s |
+| v0.25.0 `load()` | 124 MB | 126.6 s |
+| v0.25.0 `load(stream=True)` | 85.5 MB | 125.3 s |
+| v0.25.0 `iter_frames()` | 44.9 MB | 117.9 s |
+
+v0.24.2 的 2.6 GB 全部来自视频帧数组（30,000 × 96×72×3×4 B ≈ 2.5 GB），随分辨率线性增长——换成真实的 288×384 会到 40 GB，直接 OOM。改造后内存占用与视频分辨率、episode 长度都无关。
+
+### Fixed
+
+- **ffmpeg 子进程泄漏**：生成器被提前 `break` 或抛异常时，`_iter_ffv1_frames` 在 `finally` 里依次 close stdout → `terminate()` → 5 秒超时后 `kill()` 三级兜底。
+
+### Compatibility
+
+逐字段一致性实测（daimon 真实数据集，663 帧）：
+
+- `load()` 输出与 v0.24.2 **完全一致**，唯一差异是新增的 `streamed` 字段（`None` → `False`）与 `aggregate_stats`。
+- `iter_frames()` 产出的帧与 `load().frames` 逐帧一致（14 维 Schema V2、`sensor_specific`、`manipulation_phase`、`confidence` 全部对齐）。
+- 末帧复用语义（原 `fidx = min(i, len-1)`）在流式下精确复现：deformation 耗尽后复用最后一帧，shear 独立判断是否耗尽，相机 fallback 的双帧滑动窗口也一致。
+
+### Tests
+
+- 505 passed, 4 skipped。Windows 下需设 `PYTHONUTF8=1`：`test_json_export` 因 `open()` 未指定 encoding 在 GBK 环境下读 UTF-8 JSON 失败，是既有环境问题，与本次改动无关。
+
+---
+
 ## [0.24.2] - 2026-10-30
 
 修三个"第一眼就会撞上"的问题：装完包跑 `tlabel.demo()` 和 `tlabel validate`，都会立刻看到不一致。
