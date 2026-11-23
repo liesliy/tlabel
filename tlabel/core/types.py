@@ -163,13 +163,26 @@ class TLabelFrame:
 
         if field == "contact":
             if not new_value:
-                # 接触归零 → 力度/滑移/形变 全部归零
-                zero_fields = ["force_magnitude", "slip_event", "object_deformation"]
-                for zf in zero_fields:
+                # 接触结束 → 力度 / 形变不再有有效值
+                #
+                # P9/T0-4 修正：这里不再写 0.0。
+                # 0.0 是"测得零力"，None 是"没有有效值"。无接触帧上力本来就不可测，
+                # 写成 0.0 会让下游把"测不到"读成"测到零"，与 LeRobot stats.json
+                # 被 0.0 污染是同型错误。缺失必须能表达为缺失。
+                for zf in ("force_magnitude", "object_deformation"):
                     old_val = getattr(sv2, zf, None)
-                    if old_val is not None and old_val != 0 and old_val is not False:
-                        setattr(sv2, zf, 0.0 if zf != "slip_event" else False)
-                        cascades.append({"field": zf, "old_value": old_val, "new_value": 0.0 if zf != "slip_event" else False})
+                    if old_val is not None and old_val != 0:
+                        setattr(sv2, zf, None)
+                        cascades.append({
+                            "field": zf, "old_value": old_val, "new_value": None,
+                        })
+                # slip_event 目前是 bool 二态字段，无法表达"不适用"。
+                # 待 T0-5 三态化后改为置 None；在此之前保持 False。
+                if sv2.slip_event:
+                    sv2.slip_event = False
+                    cascades.append({
+                        "field": "slip_event", "old_value": True, "new_value": False,
+                    })
                 # force_vector 归零
                 if sv2.force_vector is not None:
                     old_fv = sv2.force_vector

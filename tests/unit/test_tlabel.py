@@ -141,11 +141,16 @@ class TestTLabelFrame:
         assert rec["new_value"] == 0.0
 
     def test_patch_cascade_contact_to_zero(self):
+        """P9/T0-4：contact 归零后，力/形变应变为 None（没有有效值），而不是 0.0。
+
+        0.0 是"测得零力"，None 是"无有效值"。无接触帧上力本来不可测，
+        写成 0.0 会让下游把"测不到"读成"测到零"。
+        """
         f = self._make_frame()
         f.patch("contact", 0.0, cascade=True)
-        assert f.schema_v2.force_magnitude == 0.0
+        assert f.schema_v2.force_magnitude is None
         assert f.schema_v2.slip_event is False
-        assert f.schema_v2.object_deformation == 0.0
+        assert f.schema_v2.object_deformation is None
         assert f.manipulation_phase == "idle"
 
     def test_patch_no_cascade_when_not_zero(self):

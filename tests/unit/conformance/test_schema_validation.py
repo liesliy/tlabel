@@ -145,7 +145,10 @@ def test_frame_structure(sample_data):
 
 
 def test_cascade_contact_zero():
-    """Setting contact=0 should cascade zero other force fields."""
+    """Setting contact=0 should clear other force fields to None (not 0.0).
+
+    P9/T0-4：0.0 表示"测得零力"，无接触帧上力不可测，正确表达是 None。
+    """
     frame = TLabelFrame(
         frame_idx=0, timestamp_s=0.0,
         schema_v2=TLabelSchemaV2(
@@ -161,9 +164,9 @@ def test_cascade_contact_zero():
     )
     frame.patch("contact", 0.0, cascade=True)
 
-    assert frame.schema_v2.force_magnitude == 0.0
+    assert frame.schema_v2.force_magnitude is None
     assert frame.schema_v2.slip_event is False
-    assert frame.schema_v2.object_deformation == 0.0
+    assert frame.schema_v2.object_deformation is None
     assert frame.manipulation_phase == "idle"
     assert len(frame.patches) == 1
     assert len(frame.patches[0]["cascade"]) > 0
