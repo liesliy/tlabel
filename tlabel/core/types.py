@@ -93,8 +93,14 @@ class TLabelFrame:
         return bool(self.schema_v2.slip_event)
 
     @property
-    def force_magnitude(self) -> float:
-        return self.schema_v2.force_magnitude if self.schema_v2.force_magnitude is not None else 0.0
+    def force_magnitude(self) -> Optional[float]:
+        """法向接触力 (N)，未提供时为 None。
+
+        P9 修复：此前 ``None`` 被转成 ``0.0``，把"没有这个值"伪装成"测得零力"。
+        两者语义不同 —— 0.0 是有效测量，None 是缺失。填充 0.0 会让统计摘要、
+        训练特征和质量评分把缺失当成零测量，且无法再区分。
+        """
+        return self.schema_v2.force_magnitude
 
     @property
     def is_modified(self) -> bool:

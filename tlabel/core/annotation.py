@@ -248,6 +248,7 @@ def annotate_events_from_data(data, clear_existing: bool = False) -> int:
     # 提取时间序列
     contacts = [f.contact for f in frames]
     slips = [f.slip_event for f in frames]
+    # P9：None 表示"没有这个值"，不能当 0.0 参与统计
     forces = [f.force_magnitude for f in frames]
 
     # --- contact_onset / contact_loss ---
@@ -284,23 +285,31 @@ def annotate_events_from_data(data, clear_existing: bool = False) -> int:
         count += 1
 
     # --- force_spike ---
-    if n >= 3:
-        mean_f = sum(forces) / n
-        var_f = sum((f - mean_f) ** 2 for f in forces) / n
+    # P9：只用真实存在的力值参与统计；None 不参与，也不得用 0.0 替代
+    valid_forces = [x for x in forces if x is not None]
+    if len(valid_forces) >= 3:
+        nv = len(valid_forces)
+        mean_f = sum(valid_forces) / nv
+        var_f = sum((f - mean_f) ** 2 for f in valid_forces) / nv
         std_f = math.sqrt(var_f) if var_f > 0 else 0.0
         threshold = mean_f + 2 * std_f if std_f > 0 else 1.0
 
         for i in range(1, n):
-            delta = abs(forces[i] - forces[i - 1])
-            if forces[i] > threshold and delta > std_f:
+            cur, prev = forces[i], forces[i - 1]
+            if cur is None or prev is None:
+                continue
+            delta = abs(cur - prev)
+            if cur > threshold and delta > std_f:
                 data.add_event(
                     "force_spike", frame_idx=i,
                     source="ai_predicted",
-                    metadata={"magnitude": round(forces[i], 4), "delta": round(delta, 4)},
+                    metadata={"magnitude": round(cur, 4), "delta": round(delta, 4)},
                 )
                 count += 1
 
     # --- stable_grip ---
+    # P9：稳定抓握依赖力数据。无力数据的帧不参与判定，也不生成 stable_grip
+    # 事件 —— 否则不支持力测量的传感器会被判定为"抓握稳定"，是凭空造标签。
     MIN_STABLE_FRAMES = 5
     FORCE_STABLE_THRESHOLD = 0.02
 
@@ -309,9 +318,13 @@ def annotate_events_from_data(data, clear_existing: bool = False) -> int:
         if contacts[i] and not slips[i]:
             if stable_start is None:
                 stable_start = i
-            # 检查力波动
+            # 检查力波动（只用真实存在的力值）
             if i > stable_start:
-                window = forces[stable_start:i + 1]
+                window = [x for x in forces[stable_start:i + 1] if x is not None]
+                if len(window) < 2:
+                    # 无力数据，无法判断稳定性 → 结束区间，不生成事件
+                    stable_start = None
+                    continue
                 w_max = max(window)
                 w_min = min(window)
                 if (w_max - w_min) > FORCE_STABLE_THRESHOLD:
