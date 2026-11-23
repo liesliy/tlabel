@@ -12,10 +12,13 @@ Grabette 数据适配器 — 将 Grabette Tactile 数据集转换为 TLabelData 
 单位说明（重要）:
   数据集未文档化触觉读数的物理单位，也未提供标定系数。因此本适配器：
     - contact / contact_centroid / contact_region 基于原始读数计算，可靠
-    - force_magnitude 是**网格压力积分（无量纲原始读数）**，不是牛顿值
+    - force_magnitude 恒为 None（P9/T0-11）；压力积分是无量纲原始读数，
+      挂 raw_sensor_values["pressure_integral"]
     - slip_velocity 是**归一化坐标/秒**，不是 mm/s
-    - object_deformation 是**无量纲压力变化率**，不是 mm
-  默认 Compliance Level 为 L2（L1 + force_magnitude 的无量纲代理）。
+    - object_deformation 恒为 None（P9/T0-11）；压力变化率挂
+      raw_sensor_values["pressure_change_ratio"]
+  默认 Compliance Level 为 L1（v0.26 起；原为 L2，靠 force_magnitude 代理值
+  勉强满足 L2 的字段必填约束，但那是无量纲原始读数）。
   不填 0、不虚构单位——使用者若有标定系数，可自行换算。
 
 坐标说明:
@@ -251,27 +254,32 @@ class GrabetteAdapter(DataAdapterBase):
     TLabel Schema V2 (14维)。
 
     信号到 Schema 的映射：
-      - 网格压力积分 → contact（总和超阈值）、force_magnitude（无量纲）
+      - 网格压力积分 → contact（总和超阈值）；积分值本身挂
+        raw_sensor_values["pressure_integral"]，**不填 force_magnitude**
       - 压力加权重心 → contact_centroid（双阵列分别归一化后按受力加权合并）
       - 单指尖指腹 → contact_region 恒为 "palmar"（阵列内部九宫格位置另存
         sensor_specific["grid_region"]，不冒充解剖分区）
       - 帧间质心位移 / 压力突变 → slip_event、slip_velocity
-      - 帧间压力变化率 → object_deformation
+      - 帧间压力变化率 → 挂 raw_sensor_values["pressure_change_ratio"]，
+        **不填 object_deformation**
       - 双阵列接触一致性 + is_lost → confidence
 
-    Compliance Level: L2。force_magnitude 是无量纲原始读数代理，不是牛顿值；
-    数据集未提供标定系数，也不提供切向分量，因此 force_vector / torque_vector
-    保持 None。
+    Compliance Level: **L1**（v0.26 起，原为 L2）。
 
-    逐帧 compliance_level：有接触时 L2；无接触帧没有 force_magnitude，而 Schema
-    硬约束禁止此时声明 L2，故降为 L1（与 touchd / demo 的处理一致）。adapter 的
-    capabilities 仍声明 default_compliance_level = L2。
+    P9/T0-11 修正：此前把"网格压力积分"填进 force_magnitude（单位 N）、把
+    "压力变化率"填进 object_deformation（单位 mm 或 ratio）。两者都不是该字段
+    定义的物理量 —— 一个是无量纲原始读数，一个是压力比，数据集也不提供标定
+    系数。填进去等于用 SI 单位的字段名承载非 SI 的代理值，下游无法察觉。
+    现在两者一律为 None，原始值挂 raw_sensor_values，能力声明相应改为 False。
+
+    slip_velocity 仍保留：物理量种类正确（滑移速度），只是坐标为归一化值而非
+    mm/s，属单位体系问题，留待 Schema V3.0 的单位规范化处理。
 
     参考:
       - 数据集: https://huggingface.co/datasets/CarolinePascal/grabette-tactile-full-synced
     """
 
-    default_compliance_level: str = "L2"
+    default_compliance_level: str = "L1"
 
     @property
     def name(self) -> str:
@@ -286,21 +294,24 @@ class GrabetteAdapter(DataAdapterBase):
     def get_capabilities(self) -> Dict[str, bool]:
         """13 个合法能力键（Schema V2，规范 S-7.4-1）
 
-        以 load() 实际产出的帧内容为准。force_magnitude 会填值，但单位是
-        无量纲原始读数——能力声明的是"有这个字段"，不是"有牛顿值"。
+        以 load() 实际产出的帧内容为准。P9/T0-11 起 force_magnitude /
+        object_deformation 声明为 False：传感器产出的是无量纲压力积分和压力
+        变化率，不是牛顿力和形变量，不能声明这两个能力。
         """
         return {
             "contact": True,
             "contact_centroid": True,
             "contact_region": True,
-            "force_magnitude": True,   # 无量纲：网格压力积分
+            # P9/T0-11：压力积分是无量纲原始读数，不是牛顿值 → 不声明该能力
+            "force_magnitude": False,
             "force_vector": False,     # 只有法向单轴，无切向分量
             "torque_vector": False,    # 无多轴力、无 taxel 物理间距
             "slip_event": True,
-            "slip_velocity": True,     # 归一化坐标/秒，非 mm/s
+            "slip_velocity": True,     # 归一化坐标/秒，非 mm/s（单位待 V3.0 规范）
             "manipulation_phase": True,
             "texture_class": False,    # 非视觉传感器
-            "object_deformation": True,  # 无量纲压力变化率
+            # P9/T0-11：压力变化率不是形变 → 不声明该能力
+            "object_deformation": False,
             "temperature": False,
             "confidence": True,
         }
@@ -364,7 +375,8 @@ class GrabetteAdapter(DataAdapterBase):
                 复用，避免 iter_frames 里重复计算同一帧的质心。
 
         返回:
-            TLabelSchemaV2 — 恒为 L2；force_vector / torque_vector 恒为 None
+            TLabelSchemaV2 — 恒为 L1；force_magnitude / object_deformation /
+                force_vector / torque_vector 恒为 None，代理值见 raw_sensor_values
         """
         stats = [_array_stats(raw_frame_data["grid_1"]),
                  _array_stats(raw_frame_data["grid_2"])]
@@ -385,16 +397,18 @@ class GrabetteAdapter(DataAdapterBase):
             compliance_level=self.default_compliance_level,
         )
 
+        # P9/T0-11：原始代理值挂 raw_sensor_values，不占用 SI 单位字段。
+        # pressure_integral 是网格原始读数的总和（无量纲、未标定），
+        # 与 force_magnitude 的牛顿值不是同一物理量。
+        schema.raw_sensor_values = {
+            "pressure_integral": round(float(total), 4),
+            "pressure_integral_unit": "raw int16 sum (dimensionless, uncalibrated)",
+        }
+
         if not is_contact:
-            # 无接触帧没有 force_magnitude。Schema 校验规则是
-            # "level_num >= 2 必须 force_magnitude 非 None"，所以这里不能
-            # 继续挂着 L2，降为 L1。有接触帧仍是 L2。
             schema.compliance_level = "L1"
             schema.confidence = 0.5 if is_lost else 0.95
             return schema
-
-        # force_magnitude: 网格压力积分（无量纲原始读数，不是牛顿值）
-        schema.force_magnitude = round(total, 4)
 
         # contact_centroid: 双阵列分别归一化后按受力加权合并
         weighted = [(s["centroid"], s["total"]) for s in stats
@@ -417,8 +431,8 @@ class GrabetteAdapter(DataAdapterBase):
                 total, float(prev_total), 1.0
             )
 
-            # object_deformation: 无量纲压力变化率（不是 mm）
-            schema.object_deformation = round(rel_pressure, 6)
+            # P9/T0-11：压力变化率不是形变，挂 raw_sensor_values
+            schema.raw_sensor_values["pressure_change_ratio"] = round(rel_pressure, 6)
 
             shift_th = float(raw_frame_data.get(
                 "slip_shift_threshold", _GRABETTE_SLIP_SHIFT_DEFAULT))
@@ -556,7 +570,8 @@ class GrabetteAdapter(DataAdapterBase):
 
                 # 供下一帧用的状态
                 prev_centroid = schema.contact_centroid
-                prev_total = schema.force_magnitude
+                # P9/T0-11：压力积分不再写进 force_magnitude，从 raw_sensor_values 取
+                prev_total = (schema.raw_sensor_values or {}).get("pressure_integral")
 
                 s1, s2 = stats_buf
 
@@ -612,8 +627,9 @@ class GrabetteAdapter(DataAdapterBase):
                     "episode_index": target_ep,
                     "num_frames": num_frames_total,
                     "note": (
-                        "force_magnitude 为无量纲原始读数积分；"
-                        "slip_velocity 单位为归一化坐标/秒"
+                        "P9/T0-11：force_magnitude / object_deformation 恒为 None；"
+                        "压力积分与压力变化率见 raw_sensor_values。"
+                        "slip_velocity 单位为归一化坐标/秒（非 mm/s）"
                     ),
                 },
             }

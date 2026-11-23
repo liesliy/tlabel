@@ -258,13 +258,16 @@ class TestExtractSchema:
         assert ok is True
         assert errors == []
 
-    def test_contact_sets_force_magnitude(self, grabette_adapter):
+    def test_contact_pressure_integral_goes_to_raw_values(self, grabette_adapter):
+        """P9/T0-11：压力积分是无量纲原始读数，挂 raw_sensor_values，
+        不再填进 force_magnitude（单位 N）。"""
         s = grabette_adapter.extract_schema({
             "grid_1": _grid((6, 6), peak_at=(2, 1), peak_val=500),
             "grid_2": _grid((4, 8), peak_at=(1, 2), peak_val=800),
         })
         assert s.contact is True
-        assert s.force_magnitude == pytest.approx(1300.0)
+        assert s.force_magnitude is None
+        assert s.raw_sensor_values["pressure_integral"] == pytest.approx(1300.0)
 
     def test_force_vector_and_torque_always_none(self, grabette_adapter):
         """单轴法向压力，拿不到矢量力和力矩"""
@@ -277,12 +280,13 @@ class TestExtractSchema:
         assert s.temperature is None
         assert s.texture_class is None
 
-    def test_compliance_level_is_l2(self, grabette_adapter):
+    def test_compliance_level_is_l1(self, grabette_adapter):
+        """P9/T0-11：无牛顿力、无形变，最高只能是 L1。"""
         s = grabette_adapter.extract_schema({
             "grid_1": _grid((6, 6), peak_at=(2, 1), peak_val=500),
             "grid_2": _grid((4, 8), peak_at=(1, 2), peak_val=800),
         })
-        assert s.compliance_level == "L2"
+        assert s.compliance_level == "L1"
 
     def test_is_lost_lowers_confidence(self, grabette_adapter):
         base = {
@@ -330,7 +334,8 @@ class TestExtractSchema:
         assert s.slip_event is False
         assert s.slip_velocity is None
 
-    def test_object_deformation_is_dimensionless_ratio(self, grabette_adapter):
+    def test_pressure_change_ratio_goes_to_raw_values(self, grabette_adapter):
+        """P9/T0-11：压力变化率不是形变，挂 raw_sensor_values。"""
         s = grabette_adapter.extract_schema({
             "grid_1": _grid((6, 6), peak_at=(2, 1), peak_val=500),
             "grid_2": _grid((4, 8), peak_at=(1, 2), peak_val=800),
@@ -339,7 +344,8 @@ class TestExtractSchema:
             "dt": 0.02,
         })
         # |1300 - 2600| / max(1300, 2600, 1) = 0.5
-        assert s.object_deformation == pytest.approx(0.5, abs=1e-5)
+        assert s.object_deformation is None
+        assert s.raw_sensor_values["pressure_change_ratio"] == pytest.approx(0.5, abs=1e-5)
 
     def test_custom_slip_threshold(self, grabette_adapter):
         """把阈值调到极高时不应触发 slip"""
@@ -403,17 +409,14 @@ class TestLoad:
         assert ei["num_frames"] == 4
         assert ei["total_episodes"] == 2
 
-    def test_compliance_level_by_contact(self, grabette_adapter, dataset):
-        """有接触 L2，无接触 L1；且每帧都要过 Schema 校验"""
+    def test_compliance_level_always_l1(self, grabette_adapter, dataset):
+        """P9/T0-11：全部帧 L1（无牛顿力、无形变），且每帧都要过 Schema 校验"""
         data = grabette_adapter.load(str(dataset))
         for f in data.frames:
             s = f.schema_v2
-            if s.contact:
-                assert s.compliance_level == "L2"
-                assert s.force_magnitude is not None
-            else:
-                assert s.compliance_level == "L1"
-                assert s.force_magnitude is None
+            assert s.compliance_level == "L1"
+            assert s.force_magnitude is None
+            assert s.object_deformation is None
             ok, errors = s.validate()
             assert ok, errors
 
@@ -500,13 +503,15 @@ class TestCapabilities:
     def test_true_capabilities(self, grabette_adapter):
         caps = grabette_adapter.get_capabilities()
         for k in ("contact", "contact_centroid", "contact_region",
-                  "force_magnitude", "slip_event", "slip_velocity",
-                  "manipulation_phase", "object_deformation", "confidence"):
+                  "slip_event", "slip_velocity",
+                  "manipulation_phase", "confidence"):
             assert caps[k] is True, k
 
     def test_false_capabilities(self, grabette_adapter):
+        """P9/T0-11：force_magnitude / object_deformation 降为 False。"""
         caps = grabette_adapter.get_capabilities()
-        for k in ("force_vector", "torque_vector", "texture_class",
+        for k in ("force_magnitude", "object_deformation",
+                  "force_vector", "torque_vector", "texture_class",
                   "temperature"):
             assert caps[k] is False, k
 
@@ -542,5 +547,4 @@ class TestExport:
         assert len(payload["frames"]) == 4
         for f in payload["frames"]:
             sv = f["schema_v2"]
-            expected = "L2" if sv["contact"] else "L1"
-            assert sv["compliance_level"] == expected
+            assert sv["compliance_level"] == "L1"
