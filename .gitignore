@@ -30,10 +30,14 @@ Thumbs.db
 htmlcov/
 
 # Internal docs (not for public repo)
+internal-docs/
+docs/internal/
 docs/DESIGN-INTERNAL.md
+TLabel发版规范与平台规则.md
+*.发版*.md
 
 # Temporary files
 tmp/
 *.tmp
 *.bak
-internal-docs/PRODUCT_DEFINITION.md
+tlabel-v050-src/
