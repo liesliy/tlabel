@@ -131,7 +131,7 @@ def _extract_tlabel_v2(diff_img: Optional[np.ndarray],
                        is_contact: bool) -> Dict[str, float]:
     """从背景减除后的图像提取 TLabel v2 22维特征 (简化版)"""
     empty = {k: 0.0 for k in [
-        "contact", "deformation_magnitude", "force_magnitude", "force_peak",
+        "contact", "deformation_magnitude", "force_peak",
         "force_direction", "slip_entropy", "slip_event", "texture_energy",
         "edge_density", "contact_area", "centroid_x",
         "normal_field_magnitude", "normal_field_variance",
@@ -149,7 +149,8 @@ def _extract_tlabel_v2(diff_img: Optional[np.ndarray],
 
     contact = float(is_contact)
     deformation_mag = float(np.sqrt(np.mean(diff_img ** 2)))
-    force_mag = deformation_mag
+    # P9/T0-6：删掉 force_mag = deformation_mag 的别名 —— 形变不是力，
+    # 保留这个别名只会诱导下游把它当力用。
     force_peak = float(np.max(np.abs(gray)))
 
     # 力方向
@@ -201,7 +202,6 @@ def _extract_tlabel_v2(diff_img: Optional[np.ndarray],
     return {
         "contact": contact,
         "deformation_magnitude": round(deformation_mag, 4),
-        "force_magnitude": round(force_mag, 4),
         "force_peak": round(force_peak, 4),
         "force_direction": round(force_dir, 2),
         "slip_entropy": round(slip_ent, 4),
@@ -237,10 +237,18 @@ def _detect_contact_from_image(diff_img: Optional[np.ndarray],
 class YCBSlideAdapter(BaseAdapter):
     """YCB-Slide (MidasTouch, CoRL 2022) → TLabelData
 
-    Compliance Level: L2（deformation_mag 近似 force_magnitude，force_direction 恒为0.0）
+    Compliance Level: **L1**（v0.26 起，原为 L2）。
+
+    P9/T0-6 修正：此前把 ``deformation_magnitude``（背景减除图像的强度 RMS，
+    无量纲）直接填进 ``force_magnitude``（单位 N）。视觉形变程度不是力，
+    数据集也没有标定系数。现在 ``force_magnitude`` 恒为 None，原始形变量挂
+    ``raw_sensor_values["deformation_magnitude"]``。
+
+    ``object_deformation`` 保留：物理量种类正确（形变程度），只是单位是图像
+    强度 RMS 而非 mm，属单位体系问题，留待 Schema V3.0 处理。
     """
 
-    default_compliance_level: str = "L2"
+    default_compliance_level: str = "L1"
 
     @property
     def name(self) -> str:
@@ -260,7 +268,7 @@ class YCBSlideAdapter(BaseAdapter):
                 - prev_diff_img: ndarray 或 None 上一帧背景减除图像（可选）
 
         返回:
-            TLabelSchemaV2 — L2级别，deformation_mag 近似 force_magnitude，
+            TLabelSchemaV2 — L1级别，force_magnitude 恒为 None，
             force_vector 为 None（无3D力测量）
         """
         # 复用现有模块级 _extract_tlabel_v2 函数获取22维dict
@@ -272,30 +280,37 @@ class YCBSlideAdapter(BaseAdapter):
         return self._v2_to_schema_v2(tlabel_v2)
 
     def _v2_to_schema_v2(self, tlabel_v2: Dict[str, Any]) -> TLabelSchemaV2:
-        """把 22 维 flat 特征映射到 14 维 Schema V2（L2 自评）。
+        """把 22 维 flat 特征映射到 14 维 Schema V2（L1 自评）。
 
-        ``load()`` 与 ``extract_schema()`` 共用。注意 force_magnitude 是
-        ``deformation_magnitude`` 的视觉近似、confidence 是按接触状态写死的
-        常数，不是真实力/置信度估计。
+        ``load()`` 与 ``extract_schema()`` 共用。confidence 是按接触状态写死
+        的常数，不是真实置信度估计。
+
+        P9/T0-6：``force_magnitude`` 恒为 None —— ``deformation_magnitude``
+        是图像强度 RMS，不是力。原始值挂 raw_sensor_values。
         """
         contact = float(tlabel_v2["contact"]) > 0.5
         centroid_x = tlabel_v2.get("centroid_x", 0.5)
+        deformation = float(tlabel_v2["deformation_magnitude"])
 
         return TLabelSchemaV2(
             contact=contact,
             contact_centroid=[float(centroid_x), 0.5] if contact else None,
             contact_region=None,
-            force_magnitude=float(tlabel_v2["deformation_magnitude"]),  # 近似
-            force_vector=None,  # L2: 无3D力
+            force_magnitude=None,  # P9/T0-6: 视觉形变不是力
+            force_vector=None,  # 无3D力
             torque_vector=None,
             slip_event=float(tlabel_v2["slip_event"]) > 0.5,
             slip_velocity=None,
             manipulation_phase=None,
             texture_class=None,
-            object_deformation=float(tlabel_v2["deformation_magnitude"]),
+            object_deformation=deformation,  # 形变种类正确，单位待 V3.0 规范
             temperature=None,
             confidence=0.95 if not contact else 0.8,
             compliance_level=self.default_compliance_level,
+            raw_sensor_values={
+                "deformation_magnitude": deformation,
+                "deformation_magnitude_unit": "image intensity RMS (dimensionless)",
+            },
         )
 
     def get_capabilities(self) -> Dict[str, bool]:
@@ -303,14 +318,15 @@ class YCBSlideAdapter(BaseAdapter):
 
         判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
         理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
-        YCB-Slide（DIGIT）。force_magnitude 是形变近似；confidence 是按接触
-        状态写死的常数（0.95/0.8），不是真实置信度估计。
+        YCB-Slide（DIGIT）。P9/T0-6 起 force_magnitude 为 False（视觉形变
+        RMS 不是力）；confidence 是按接触状态写死的常数（0.95/0.8），
+        不是真实置信度估计。
         """
         return {
             "contact": True,
             "contact_centroid": True,
             "contact_region": False,
-            "force_magnitude": True,  # 由 deformation_magnitude 近似，非标定牛顿值
+            "force_magnitude": False,  # P9/T0-6：视觉形变 RMS 不是力
             "force_vector": False,
             "torque_vector": False,
             "slip_event": True,
