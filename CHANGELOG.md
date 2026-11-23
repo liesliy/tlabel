@@ -4,6 +4,69 @@ All notable changes to the TLabel project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+**技术债清零：缺失值不再被静默填成 0.0，代理值不再冒充 SI 单位。BREAKING。**
+
+两条同型错误贯穿全项目：一是把"没有这个值"写成 `0.0`（"测得零"），二是把
+非 SI 的代理量填进 SI 单位字段。两者都让下游无法区分"没测到"和"测到零/测到
+这个数"，而下游（统计摘要、事件判定、训练特征、质量评分）全都建立在这些
+数字之上。
+
+具体后果举例：一个不支持力测量的传感器，因为力值被填成 0.0，会被事件检测器
+判为"抓握稳定"——凭空生成标签；滑移检测会因 `prev_total` 变成 0 而失效；
+`describe()` 的均值被缺失帧拉低一半。这与我们批评 LeRobot `stats.json` 被
+0.0 污染是同一类错误。
+
+### Breaking Changes
+
+- **`TLabelFrame.force_magnitude` 返回 `float | None`**：此前缺失时返回 `0.0`。
+- **`_sv2_scalar()` 的 `missing` 参数改为必填**：调用方必须显式声明"字段缺失
+  时返回什么"，不能依赖隐式的 `0.0` 默认值。21 个调用点全部显式声明：统计 /
+  差分 / 事件判定传 `None` 并过滤，模型特征提取传 `0.0` 并注明是特征填充。
+- **`_apply_cascade()` 在接触结束时把 `force_magnitude` / `object_deformation`
+  置 `None`**：此前置 `0.0`，等于宣告"测得零力"。
+- **六个适配器清除代理值，`compliance_level` 相应下调**：
+
+  | Adapter | 原等级 | 新等级 | 原代理值 |
+  |---|---|---|---|
+  | `ycb_slide` | L2 | L1 | 背景减除图像强度 RMS → `force_magnitude` |
+  | `vtouch` | L2 | L1 | 背景减除图像强度 RMS → `force_magnitude` |
+  | `gelsight` | L2 | L1（无标定）/ L3（有标定） | 图像形变 RMS → `force_magnitude` |
+  | `daimon_dataset` | L2/L3 | L1 | 形变 RMS × 100、夹爪开度 × 10 → `force_magnitude` |
+  | `daimon_dm_tac` | L2 | L1 | 形变灰度图统计量 × 100 → `force_magnitude` |
+  | `grabette` | L2 | L1 | 网格压力积分 → `force_magnitude`、压力变化率 → `object_deformation` |
+
+  原代理值一律改挂 `raw_sensor_values`，并标注单位（多数是
+  `dimensionless, uncalibrated`）。对应能力声明 `capabilities["force_magnitude"]`
+  改为 `False`。
+
+  `gelsight` 是特例：数据集本身带标定力向量 `traj["forces"]`，此前却拿形变冒充
+  力——放着真力数据不用。现在有 `force_vector_N` 时 `force_magnitude` 取力向量
+  模长（真实牛顿值）并报 L3，无标定时才为 `None`。
+
+  `object_deformation` 在物理量**种类**正确时保留（形变程度），即使单位不是
+  毫米；单位规范化推迟到 Schema V3.0。
+
+### Added
+
+- **`TLabelSchemaV2.validate(capabilities=...)`**：可选的能力↔帧值交叉校验通道。
+  声明为 `False` 的维度，对应字段必须是 `None`；填 `0.0` / `False` 会报错。
+  这是打通"能力声明"与"实际帧值"的第一条校验，此前两者可以完全脱节。
+- **`describe()` 的统计条目新增 `missing` 字段**：记录该字段缺失了多少帧。
+  全缺失的字段不产出统计条目（保持原契约：只描述有数据的字段）。
+
+### Fixed
+
+- `grabette` 的滑移检测此前读 `schema.force_magnitude` 作 `prev_total`，该字段
+  改为 `None` 后会静默失效；改从 `raw_sensor_values["pressure_integral"]` 取。
+- 多个适配器的 22 维 v1 特征 dict 删掉 `force_magnitude` 键及 `force_mag =
+  deformation_mag` 别名——这个别名只会诱导下游把它当力用。
+- `daimon_dataset` 的 `nf_mag` fallback 从已删除的 `force_mag` 改为
+  `deformation_magnitude`。
+- `gelsight` 的 `deformation_magnitude_peak` 当前值等于 `deformation_magnitude`
+  （RMS），并非真峰值；改值会影响既有 classifier 一致性，暂只标记待清理。
+
 ## [0.25.0] - 2026-11-12
 
 流式改造：适配器不再把整段触觉视频读进内存。**不是 breaking change**——`load()` 的签名与返回值逐字段不变，新增参数全部带默认值，原有 12 个适配器的现有调用代码一行都不用改。

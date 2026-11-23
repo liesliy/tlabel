@@ -476,12 +476,13 @@ full L4 conformance MUST enforce [S-5.2-4] themselves.
 | `tacquad` | L1 | Images only; approximate force for Tac3D |
 | `xela` | L1 | Upgrades to L3 only when `force_scale` calibration is supplied |
 | `paxini` / `paxini_gen3` | L2 | Normal force scalar only |
-| `ycb_slide` | L2 | Deformation magnitude approximates normal force |
-| `vtouch` | L2 | Force information available |
+| `ycb_slide` | L1 | Vision only; deformation magnitude is **not** a force reading |
+| `vtouch` | L1 | Vision only; no force calibration in the dataset |
 | `syntouch` | L2 | BioTac force channels |
 | `univtac` | L2 | Force magnitude + shear |
-| `gelsight` | L2 | Visuo-tactile; 3-D force requires calibration |
-| `daimon` / `daimon_dm_tac` | L2 | Deformation/shear/depth streams; calibration-dependent |
+| `gelsight` | L1 | L3 when the pkl carries calibrated `force_vector_N`; otherwise no force reading |
+| `daimon` / `daimon_dm_tac` | L1 | Deformation/shear/depth streams; no force calibration |
+| `grabette` | L1 | Pressure arrays only; pressure integral is **not** a force reading |
 | `touchd` | L3 | Ground-truth 3-D force labels |
 | `tashan_ts_f_a` | L3 | Complete 3-D force vector `[fx, fy, normal_force]` |
 | `tlabel` | L1 | Built-in format example |
@@ -490,6 +491,17 @@ full L4 conformance MUST enforce [S-5.2-4] themselves.
 > adapter can satisfy. An adapter MAY emit a lower level for individual frames
 > (e.g. `tashan_ts_f_a` emits L1 for no-contact frames), but MUST NOT emit a
 > level higher than its declared capability.
+
+> **Note (v0.26) — proxy values removed.** `ycb_slide`, `vtouch`, `gelsight`
+> (uncalibrated path), `daimon`, `daimon_dm_tac` and `grabette` previously
+> reported L2 by filling `force_magnitude` with a deformation or pressure proxy.
+> A deformation RMS or a pressure integral is not a force in newtons, so these
+> adapters now report L1 — `gelsight` reports L3 only when the source pkl carries
+> a calibrated `force_vector_N`, in which case `force_magnitude` is the norm of
+> that vector. The underlying raw quantities are still available in
+> `raw_sensor_values`. `object_deformation` is retained where the physical
+> quantity kind is correct (a deformation measure), even though its unit is not
+> millimetres; unit normalisation is deferred to Schema V3.0.
 
 ---
 
