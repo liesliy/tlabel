@@ -66,19 +66,22 @@ class DaimonDmTacAdapter(SensorAdapterBase):
         理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
         戴盟 DM-Tac 三路（deformation/shear/depth）实时传感器。单目无法得到 3D
         力矢量；manipulation_phase 在 load 中写死哨兵值 idle，不构成阶段能力。
+
+        P9/T0-10：``force_magnitude`` 为 False —— 形变灰度图 × 100 是经验魔数，
+        不是牛顿值，传感器不提供力标定。
         """
         return {
             "contact": True,
             "contact_centroid": True,
             "contact_region": False,
-            "force_magnitude": True,  # 由形变灰度图经验映射（×100），非标定牛顿值
+            "force_magnitude": False,  # P9/T0-10：形变灰度图 × 100 不是力，无标定数据
             "force_vector": False,
             "torque_vector": False,
             "slip_event": True,
             "slip_velocity": True,  # 由 shear 通道换算
             "manipulation_phase": False,  # load 写死 "idle" 哨兵，不做阶段推断
             "texture_class": False,
-            "object_deformation": True,  # 由 deformation_magnitude 映射
+            "object_deformation": True,  # 种类正确（形变），单位待 V3.0 规范
             "temperature": False,
             "confidence": True,
         }
@@ -163,8 +166,8 @@ class DaimonDmTacAdapter(SensorAdapterBase):
             contact = max_val > 0.1
             deformation_mag = float(np.sqrt(mean_val ** 2 + var_val))
             contact_area = float(np.mean(deform_gray > 0.05))
-            force_mag = deformation_mag * 100.0  # 经验映射
-            force_peak = max_val * 100.0
+            # P9/T0-10：删掉 force_mag = deformation_mag * 100 的"经验映射"。
+            # 形变灰度图统计量乘一个无标定系数的魔数不是牛顿值。
 
             # 形心 (归一化到 [0, 1])
             if contact and contact_area > 0.01:
@@ -184,8 +187,6 @@ class DaimonDmTacAdapter(SensorAdapterBase):
             contact = False
             deformation_mag = 0.0
             contact_area = 0.0
-            force_mag = None
-            force_peak = 0.0
             contact_centroid = None
             confidence = 0.95
 
@@ -204,7 +205,8 @@ class DaimonDmTacAdapter(SensorAdapterBase):
             contact=contact,
             contact_centroid=contact_centroid,
             contact_region="palmar" if contact else None,
-            force_magnitude=round(force_mag, 4) if force_mag is not None else None,
+            # P9/T0-10：形变灰度图 × 100 不是力，恒为 None
+            force_magnitude=None,
             force_vector=None,       # DM-Tac 单目无法直接得到3D力矢量
             torque_vector=None,
             slip_event=slip_event,
@@ -214,7 +216,17 @@ class DaimonDmTacAdapter(SensorAdapterBase):
             object_deformation=round(deformation_mag, 4) if contact else None,
             temperature=None,
             confidence=confidence,
-            compliance_level="L2",   # 能提供 contact + force_magnitude
+            # P9/T0-10：原为 L2 —— 靠形变×100 的 force_magnitude 勉强满足 L2
+            # 的字段必填。无标定力数据，实际能力是 L1。
+            compliance_level="L1",
+            # P9：无 deform 帧（deform_gray 为 None）时形变量是"没有值"而非"测得零"
+            raw_sensor_values=(
+                {
+                    "deformation_magnitude": round(deformation_mag, 4),
+                    "deformation_magnitude_unit": "deformation grayscale RMS (dimensionless)",
+                }
+                if deform_gray is not None and deform_gray.size > 0 else None
+            ),
         )
 
         return schema
@@ -351,8 +363,7 @@ class DaimonDmTacAdapter(SensorAdapterBase):
             tlabel_v2 = {
                 "contact": contact,
                 "deformation_magnitude": round(deformation_mag, 4),
-                "force_magnitude": round(deformation_mag * 100, 4),
-                "force_peak": round(float(gray.max()) * 100, 4),
+                "force_peak": round(float(gray.max()) * 100, 4),  # 待清理：命名与值不符
                 "force_direction": 0.0,
                 "slip_entropy": 0.0,
                 "slip_event": 0.0,
@@ -486,8 +497,7 @@ class DaimonDmTacAdapter(SensorAdapterBase):
                 tlabel_v2 = {
                     "contact": contact,
                     "deformation_magnitude": round(deformation_mag, 4),
-                    "force_magnitude": round(deformation_mag * 100, 4),
-                    "force_peak": round(float(gray.max()) * 100, 4),
+                    "force_peak": round(float(gray.max()) * 100, 4),  # 待清理：命名与值不符
                     "force_direction": 0.0,
                     "slip_entropy": 0.0,
                     "slip_event": 0.0,
