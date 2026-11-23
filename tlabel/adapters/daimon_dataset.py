@@ -746,23 +746,21 @@ def _extract_tlabel_v2_from_state(state: np.ndarray, action: np.ndarray,
         if len(finger_valid) > 0 and np.any(np.abs(finger_valid) > 0.3):
             is_contact = True
 
-    # Force: 视频deformation_magnitude优先，否则gripper估算
-    if force_metrics:
-        force_mag = force_metrics.get("mean_force", 0.0)
-        force_peak = force_metrics.get("max_force", 0.0)
-    elif "deformation_magnitude" in vf:
-        # 视频deformation直接反映力度
-        force_mag = vf["deformation_magnitude"] * 100  # 缩放到合理范围
-        force_peak = force_mag * 1.5
+    # Force: 本 adapter 不产出力值（P9/T0-9）
+    #
+    # 此前这里有三条"造力"路径：
+    #   1. force_metrics（形参，全文件无调用方传入，恒为 None —— 死路径）
+    #   2. deformation_magnitude * 100（图像形变 RMS 乘魔数 100，无标定依据）
+    #   3. |gripper| * 10（夹爪开度乘魔数 10，与力无关）
+    # 三者都不是牛顿值。数据集不提供力标定，force_magnitude 一律为 None，
+    # 形变量挂 raw_sensor_values。
+    #
+    # force_peak 键仍保留（下游 22 维特征消费方按定长读取），但值来自形变，
+    # 命名与语义不符，属阶段 2 待清理的技术债。
+    if "deformation_magnitude" in vf:
+        force_peak = vf["deformation_magnitude"] * 1.5
     else:
-        gripper_left = state_m[65] if not np.isnan(state_m[65]) else np.nan
-        gripper_right = state_m[66] if len(state_m) > 66 and not np.isnan(state_m[66]) else np.nan
-        gripper_main = gripper_left if not np.isnan(gripper_left) else gripper_right
-        if gripper_main is not np.nan and not np.isnan(gripper_main):
-            force_mag = max(0, abs(gripper_main) * 10)
-        else:
-            force_mag = 0.0
-        force_peak = force_mag
+        force_peak = 0.0
 
     # Deformation: 视频优先
     if "deformation_magnitude" in vf:
@@ -806,7 +804,9 @@ def _extract_tlabel_v2_from_state(state: np.ndarray, action: np.ndarray,
             delta_fs = float(np.sqrt(np.sum((right_acc - prev_acc) ** 2)))
 
     # Normal/shear field: 视频优先
-    nf_mag = vf.get("normal_field_magnitude", force_mag)
+    # P9/T0-9：force_mag 已删除，改用 deformation_magnitude 作 fallback。
+    # normal_field_magnitude 是法向场强度（图像量），不是力，命名属阶段 2 待清理。
+    nf_mag = vf.get("normal_field_magnitude", vf.get("deformation_magnitude", 0.0))
     nf_var = vf.get("normal_field_variance", 0.0)
     sf_mag = vf.get("shear_field_magnitude", 0.0)
     sf_dir = vf.get("shear_field_direction", 0.0)
@@ -843,7 +843,6 @@ def _extract_tlabel_v2_from_state(state: np.ndarray, action: np.ndarray,
     return {
         "contact": 1.0 if is_contact else 0.0,
         "deformation_magnitude": round(deformation_mag, 4),
-        "force_magnitude": round(force_mag, 4),
         "force_peak": round(force_peak, 4),
         "force_direction": round(force_dir, 2),
         "slip_entropy": round(slip_entropy, 4),
@@ -930,9 +929,10 @@ def _infer_phases(frames_contact, frames_slip):
 class DaimonAdapter(BaseAdapter):
     """戴盟 Daimon-Infinity Parquet → TLabelData"""
 
-    # v0.17: Compliance Level — Daimon有deformation视频估算force_magnitude(L2)，
+    # P9/T0-9：原为 L2 —— 靠 deformation 视频估算 force_magnitude 勉强满足 L2
+    # 的字段必填，但那是形变 RMS 乘魔数。数据集无力标定，实际能力是 L1。
     # 有shear视频时可合成force_vector(L3)，默认L2
-    default_compliance_level: str = "L2"
+    default_compliance_level: str = "L1"
 
     @property
     def name(self) -> str:
@@ -954,14 +954,14 @@ class DaimonAdapter(BaseAdapter):
             "contact": True,
             "contact_centroid": True,
             "contact_region": False,
-            "force_magnitude": True,  # 由形变视频估算，非标定牛顿值
+            "force_magnitude": False,  # P9/T0-9：形变 RMS × 100 不是力，无标定数据
             "force_vector": True,  # 条件：有 shear 视频时合成 [Fx,Fy,Fz]
             "torque_vector": False,
             "slip_event": True,
             "slip_velocity": True,  # 条件：有 optical flow 时换算滑移速度
             "manipulation_phase": True,
             "texture_class": False,
-            "object_deformation": True,  # 由 deformation_magnitude 映射
+            "object_deformation": True,  # 种类正确（形变），单位待 V3.0 规范
             "temperature": False,
             "confidence": True,
         }
@@ -979,10 +979,10 @@ class DaimonAdapter(BaseAdapter):
         Daimon适配器策略:
           - contact: 从tlabel_v2.contact或视频特征推断
           - contact_centroid: 从centroid_x估算 [cx, cy]
-          - force_magnitude: 从deformation视频估算（视频优先 > gripper估算）
-          - force_vector: 如果有shear视频数据可合成 [Fx, Fy, Fz]，否则None
-          - object_deformation: 从deformation_magnitude提取
-          - compliance_level: 有shear视频时L3，否则L2
+          - force_magnitude: 恒 None（P9/T0-9：形变 RMS × 100 不是力）
+          - force_vector: None（无力值可合成）
+          - object_deformation: 从deformation_magnitude提取（图像 RMS，非 mm）
+          - compliance_level: L1
 
         Args:
             raw_frame_data: TLabelFrame实例或tlabel_v2字典
@@ -1012,41 +1012,27 @@ class DaimonAdapter(BaseAdapter):
         if centroid_x is not None and schema.contact:
             schema.contact_centroid = [float(centroid_x), 0.0]
 
-        # 2. force_magnitude: 优先使用视频deformation估算
-        #    _extract_tlabel_v2_from_state中已计算，直接复用
-        force_mag = v2_dict.get("force_magnitude")
-        if force_mag is not None and force_mag > 0:
-            schema.force_magnitude = float(force_mag)
-        else:
-            # fallback: 从deformation_magnitude估算
-            deform_mag = v2_dict.get("deformation_magnitude", 0.0)
-            schema.force_magnitude = float(deform_mag) * 100.0 if deform_mag > 0 else None
+        # 2. force_magnitude: 恒 None（P9/T0-9）
+        #
+        # 此前先用 deformation_magnitude × 100 冒充力，再用它加 shear 方向
+        # 合成 3D 力向量、顺手把 compliance_level 提到 L3 —— 一整条链都建立在
+        # 一个无标定的魔数乘算上。数据集没有力测量，这里如实置 None。
+        # 显式赋值同时挡住 from_tlabel_v1 用 force_magnitude + force_direction
+        # 隐式合成 force_vector 的路径。
+        schema.force_magnitude = None
+        schema.force_vector = None
+        schema.compliance_level = self.default_compliance_level
 
-        # 3. force_vector: 从force_magnitude + shear方向合成
-        #    Daimon有3路视频(deformation/shear/depth)，shear视频提供剪切力方向
-        shear_mag = v2_dict.get("shear_field_magnitude", 0.0)
-        shear_dir_deg = v2_dict.get("shear_field_direction", 0.0)
-        has_shear = shear_mag > 1e-6 and sensor_specific.get("video_type", "").startswith("deformation")
-
-        if schema.force_magnitude is not None and has_shear:
-            # 从法向力 + 剪切力方向合成3D力矢量
-            # Fz ≈ force_magnitude (法向), Fx/Fy从shear方向分解
-            shear_dir_rad = math.radians(shear_dir_deg)
-            # 剪切力大小从shear_field_magnitude估算（缩放到N）
-            shear_force = float(shear_mag) * 10.0  # 缩放因子
-            fx = shear_force * math.cos(shear_dir_rad)
-            fy = shear_force * math.sin(shear_dir_rad)
-            fz = float(schema.force_magnitude)
-            schema.force_vector = [round(fx, 4), round(fy, 4), round(fz, 4)]
-            schema.compliance_level = "L3"
-        else:
-            schema.force_vector = None
-            schema.compliance_level = self.default_compliance_level
-
-        # 4. object_deformation: 从deformation_magnitude直接提取
+        # 3. object_deformation: 从deformation_magnitude直接提取
+        #    种类正确（形变程度），单位为图像强度 RMS 而非 mm，属单位体系问题，
+        #    留待 Schema V3.0 处理。原始值同时挂 raw_sensor_values。
         deform = v2_dict.get("deformation_magnitude")
         if deform is not None and deform > 0:
             schema.object_deformation = float(deform)
+            schema.raw_sensor_values = {
+                "deformation_magnitude": round(float(deform), 4),
+                "deformation_magnitude_unit": "image intensity RMS (dimensionless)",
+            }
 
         # 5. slip_velocity: 如果有slip_event，从optical_flow提取
         if schema.slip_event:
