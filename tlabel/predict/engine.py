@@ -105,7 +105,9 @@ class PredictEngine:
             return self
         self._stats = {}
         for key in self._STAT_FIELDS:
-            values = [_sv2_scalar(f, key) for f in data.frames]
+            # P9：缺失值不参与统计
+            raw = [_sv2_scalar(f, key, missing=None) for f in data.frames]
+            values = [v for v in raw if v is not None]
             if not values:
                 continue
             mean = sum(values) / len(values)
@@ -153,11 +155,14 @@ class PredictEngine:
 
             frames_data = []
             for frame in data.frames:
+                # 注意：这里传 missing=0.0 是**特征填充**，不是"测得零值"。
+                # PostProcessor 的输入约定是稠密标量矩阵，缺失无法表达。
+                # 这是已知技术债，待阶段 2 引入 valid mask 后改为 None + mask。
                 frames_data.append({
-                    "contact": _sv2_scalar(frame, "contact"),
-                    "force_magnitude": _sv2_scalar(frame, "force_magnitude"),
-                    "slip_event": _sv2_scalar(frame, "slip_event"),
-                    "object_deformation": _sv2_scalar(frame, "object_deformation"),
+                    "contact": _sv2_scalar(frame, "contact", missing=0.0),
+                    "force_magnitude": _sv2_scalar(frame, "force_magnitude", missing=0.0),
+                    "slip_event": _sv2_scalar(frame, "slip_event", missing=0.0),
+                    "object_deformation": _sv2_scalar(frame, "object_deformation", missing=0.0),
                 })
 
             existing_phases = [f.manipulation_phase for f in data.frames]
@@ -180,7 +185,7 @@ class PredictEngine:
                             frame.manipulation_phase = str(value)
                             applied += 1
                     else:
-                        old = _sv2_scalar(frame, field)
+                        old = _sv2_scalar(frame, field, missing=None)
                         if old != value:
                             frame.patch(field, value, cascade=cascade)
                             applied += 1
@@ -194,6 +199,10 @@ class PredictEngine:
         sv2 = frame.schema_v2
 
         # === 1. contact推断 ===
+        # P9 技术债：这里缺失填 0.0 会影响"无力数据 → 推断无接触"的判定。
+        # 真正的修法是让 contact 推断在 force/deform 双双缺失时输出"未知"而不是
+        # "无接触"，但 schema_v2.contact 目前是二态（P14/T0-5 待改三态）。
+        # 阶段 0 不改此处行为，仅标记。
         force_mag = sv2.force_magnitude if sv2.force_magnitude is not None else 0.0
         deform_mag = sv2.object_deformation if sv2.object_deformation is not None else 0.0
         contact_area = _get_contact_area(frame)
@@ -445,26 +454,43 @@ class PredictEngine:
         n = len(data.frames)
 
         # 提取时序信号
-        contacts = [_sv2_scalar(f, "contact") for f in data.frames]
-        slips = [_sv2_scalar(f, "slip_event") for f in data.frames]
-        forces = [_sv2_scalar(f, "force_magnitude") for f in data.frames]
-        deformations = [_sv2_scalar(f, "object_deformation") for f in data.frames]
+        # P9：force_magnitude / object_deformation 缺失时返回 None，绝不填 0.0。
+        # 事件判定对缺失极度敏感 —— 填充 0.0 会让"有值→无值"的边界被读成一次
+        # 力骤降 / 一次形变消失，凭空生成 force_spike 与 deformation_anomaly。
+        contacts = [_sv2_scalar(f, "contact", missing=None) for f in data.frames]
+        slips = [_sv2_scalar(f, "slip_event", missing=None) for f in data.frames]
+        forces = [_sv2_scalar(f, "force_magnitude", missing=None) for f in data.frames]
+        deformations = [_sv2_scalar(f, "object_deformation", missing=None) for f in data.frames]
 
-        # 计算力的统计量
-        force_mean = sum(forces) / n if n > 0 else 0.0
-        force_var = sum((f - force_mean) ** 2 for f in forces) / n if n > 0 else 0.0
-        force_std = math.sqrt(force_var) if force_var > 0 else 0.01
+        # 计算力的统计量（只用真实存在的力值）
+        valid_forces = [x for x in forces if x is not None]
+        if valid_forces:
+            force_mean = sum(valid_forces) / len(valid_forces)
+            force_var = sum((f - force_mean) ** 2 for f in valid_forces) / len(valid_forces)
+            force_std = math.sqrt(force_var) if force_var > 0 else 0.01
+        else:
+            force_mean = None
+            force_std = None
 
-        # 形变统计量
-        deform_mean = sum(deformations) / n if n > 0 else 0.0
-        deform_var = sum((d - deform_mean) ** 2 for d in deformations) / n if n > 0 else 0.0
-        deform_std = math.sqrt(deform_var) if deform_var > 0 else 0.01
+        # 形变统计量（只用真实存在的形变值）
+        valid_deforms = [x for x in deformations if x is not None]
+        if valid_deforms:
+            deform_mean = sum(valid_deforms) / len(valid_deforms)
+            deform_var = sum((d - deform_mean) ** 2 for d in valid_deforms) / len(valid_deforms)
+            deform_std = math.sqrt(deform_var) if deform_var > 0 else 0.01
+        else:
+            deform_mean = None
+            deform_std = None
 
         # ── 1. contact_onset & contact_loss ──
         for i in range(1, n):
             prev_contact = contacts[i - 1]
             curr_contact = contacts[i]
             frame_idx = data.frames[i].frame_idx
+
+            # 缺失帧不参与接触边界判定
+            if prev_contact is None or curr_contact is None:
+                continue
 
             if prev_contact <= 0.3 and curr_contact > 0.5:
                 events.append({
@@ -487,7 +513,9 @@ class PredictEngine:
         slip_start = None
         slip_threshold = 0.3
         for i in range(n):
-            if slips[i] > slip_threshold and contacts[i] > 0.5:
+            # 缺失值不构成"滑移持续"的证据，落入 else 分支结束区间
+            if (slips[i] is not None and slips[i] > slip_threshold
+                    and contacts[i] is not None and contacts[i] > 0.5):
                 if slip_start is None:
                     slip_start = i
             else:
@@ -524,24 +552,30 @@ class PredictEngine:
                 })
 
         # ── 3. force_spike ──
-        force_spike_threshold = 2.0 * force_std
-        for i in range(1, n):
-            delta = abs(forces[i] - forces[i - 1])
-            if delta > force_spike_threshold and delta > 0.01:
-                events.append({
-                    "event_type": "force_spike",
-                    "frame_idx": data.frames[i].frame_idx,
-                    "confidence": min(0.9, 0.5 + delta / (4 * force_std + 0.01)),
-                    "source": "ai_predicted",
-                    "metadata": {"delta": round(delta, 4), "threshold": round(force_spike_threshold, 4)},
-                })
+        # P9：无力数据的帧对不参与判定；整段无有效力值时整段跳过
+        if force_std is not None:
+            force_spike_threshold = 2.0 * force_std
+            for i in range(1, n):
+                if forces[i] is None or forces[i - 1] is None:
+                    continue
+                delta = abs(forces[i] - forces[i - 1])
+                if delta > force_spike_threshold and delta > 0.01:
+                    events.append({
+                        "event_type": "force_spike",
+                        "frame_idx": data.frames[i].frame_idx,
+                        "confidence": min(0.9, 0.5 + delta / (4 * force_std + 0.01)),
+                        "source": "ai_predicted",
+                        "metadata": {"delta": round(delta, 4), "threshold": round(force_spike_threshold, 4)},
+                    })
 
         # ── 4. deformation_anomaly (区间事件) ──
-        anomaly_threshold = deform_mean + 2.5 * deform_std
+        # P9：无形变数据的帧不构成异常；整段无形变值时 anomaly_threshold 置 0 跳过
+        anomaly_threshold = (deform_mean + 2.5 * deform_std) if deform_std is not None else 0.0
         if anomaly_threshold > 0.01:
             anomaly_start = None
             for i in range(n):
-                if deformations[i] > anomaly_threshold:
+                d = deformations[i]
+                if d is not None and d > anomaly_threshold:
                     if anomaly_start is None:
                         anomaly_start = i
                 else:
@@ -556,7 +590,7 @@ class PredictEngine:
                                 "confidence": 0.6,
                                 "source": "ai_predicted",
                                 "metadata": {
-                                    "max_deformation": round(max(deformations[anomaly_start:end_i + 1]), 4),
+                                    "max_deformation": round(max(x for x in deformations[anomaly_start:end_i + 1] if x is not None), 4),
                                     "threshold": round(anomaly_threshold, 4),
                                 },
                             })
@@ -571,17 +605,24 @@ class PredictEngine:
                     "confidence": 0.6,
                     "source": "ai_predicted",
                     "metadata": {
-                        "max_deformation": round(max(deformations[anomaly_start:end_i + 1]), 4),
+                        "max_deformation": round(max(x for x in deformations[anomaly_start:end_i + 1] if x is not None), 4),
                         "threshold": round(anomaly_threshold, 4),
                     },
                 })
 
         # ── 5. stable_grip (区间事件) ──
+        # P9：稳定抓握必须有真实力数据。整段无力值时直接跳过 —— 否则填充的 0.0
+        # 会让一个不支持力测量的传感器被判为"抓握稳定"，凭空生成事件。
         stable_threshold = 8
+        if force_mean is None:
+            return events
         force_variation_threshold = 0.05 * force_mean if force_mean > 0 else 0.01
         stable_start = None
         for i in range(n):
-            is_stable = (contacts[i] > 0.8 and forces[i] > 0.1)
+            is_stable = (
+                contacts[i] is not None and contacts[i] > 0.8
+                and forces[i] is not None and forces[i] > 0.1
+            )
             if is_stable:
                 if stable_start is None:
                     stable_start = i

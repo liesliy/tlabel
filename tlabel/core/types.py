@@ -19,12 +19,31 @@ from tlabel.core.capabilities import (
 )
 
 
-def _sv2_scalar(frame: "TLabelFrame", field: str, default: float = 0.0) -> float:
-    """
-    从 frame.schema_v2 获取标量字段值。
+def _sv2_scalar(frame: "TLabelFrame", field: str, missing: Optional[float]) -> Optional[float]:
+    """从 frame.schema_v2 获取标量字段值。
 
-    如果 schema_v2 为 None 则抛出 ValueError。
-    向量/枚举类型返回 default。
+    ``missing`` 是**必填**参数（P9/T0-2）：调用方必须显式声明"字段缺失时返回
+    什么"，不能依赖一个隐式默认值。此前默认值是 ``0.0``，等于把所有缺失值
+    静默伪装成"测得零值"，统计摘要、事件判定和训练特征都无法再区分两者。
+
+    调用方的缺失策略分两类：
+
+    - **统计 / 差分 / 事件判定 / 阈值比较**：传 ``None``，由调用方过滤掉缺失
+      帧。绝不传 ``0.0`` —— 否则会凭空生成事件（例如无力数据的传感器被判为
+      "抓握稳定"）或拉低均值方差。
+    - **模型特征提取**：可传 ``0.0`` 作为特征填充，但必须在该处注明这是
+      "特征约定"而非"测量值"。这类填充仍是技术债，待阶段 2 引入 valid mask。
+
+    Args:
+        frame: 目标帧。
+        field: schema_v2 上的字段名。
+        missing: 字段缺失或不可标量化（向量/枚举）时的返回值。
+
+    Returns:
+        标量 ``float``；布尔转 1.0/0.0；缺失或不可标量化时返回 ``missing``。
+
+    Raises:
+        ValueError: ``frame.schema_v2`` 为 None（v0.17 起要求 Schema V2 数据）。
     """
     sv2 = frame.schema_v2
     if sv2 is None:
@@ -34,13 +53,13 @@ def _sv2_scalar(frame: "TLabelFrame", field: str, default: float = 0.0) -> float
         )
     val = getattr(sv2, field, None)
     if val is None:
-        return default
+        return missing
     if isinstance(val, bool):
         return 1.0 if val else 0.0
     if isinstance(val, (int, float)):
         return float(val)
-    # 向量/列表/枚举 — 返回 default
-    return default
+    # 向量/列表/枚举 — 不可标量化
+    return missing
 
 
 class TLabelFrame:
@@ -618,8 +637,13 @@ class TLabelData:
         result = {}
 
         for key in keys:
-            values = [_sv2_scalar(f, key) for f in self.frames]
+            # P9：缺失值不参与统计，也不得填 0.0 冒充测量值
+            raw = [_sv2_scalar(f, key, missing=None) for f in self.frames]
+            values = [v for v in raw if v is not None]
+            missing_count = len(raw) - len(values)
             if not values:
+                # 整段无该字段的数据 → 不产出统计条目（保持原有契约：
+                # describe() 只描述"有数据的字段"）。部分缺失通过 missing 键体现。
                 continue
 
             n = len(values)
@@ -633,6 +657,7 @@ class TLabelData:
 
             result[key] = {
                 "count": n,
+                "missing": missing_count,
                 "mean": round(mean, 4),
                 "std": round(std, 4),
                 "min": round(min(values), 4),

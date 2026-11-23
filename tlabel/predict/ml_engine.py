@@ -183,8 +183,13 @@ class MLEngine:
         self._fit_report: Dict = {}
 
     def _get_feature_value(self, frame: TLabelFrame, field_name: str) -> float:
-        """从 schema_v2 获取特征值"""
-        return _sv2_scalar(frame, field_name)
+        """从 schema_v2 获取特征值。
+
+        注意：``missing=0.0`` 是**特征填充**，不是"测得零值"。ML 特征矩阵要求
+        稠密，缺失无法表达。这是已知技术债，待阶段 2 引入 valid mask 后改为
+        None + mask。
+        """
+        return _sv2_scalar(frame, field_name, missing=0.0)
 
     def fit(self, data: TLabelData) -> "MLEngine":
         if not data.frames or len(data.frames) < MIN_TOTAL_SAMPLES:
@@ -228,8 +233,8 @@ class MLEngine:
             feature_indices = [i for i, k in enumerate(self._feature_names) if k != field_name]
             X_field = X[:, feature_indices]
 
-            # 从 schema_v2 获取目标值
-            y = np.array([_sv2_scalar(f, field_name) for f in data.frames])
+            # 从 schema_v2 获取目标值（缺失填 0.0 是训练标签约定，非测量值）
+            y = np.array([_sv2_scalar(f, field_name, missing=0.0) for f in data.frames])
 
             if field_name == "slip_event":
                 y = (y > 0.5).astype(float)
@@ -324,11 +329,13 @@ class MLEngine:
 
             frames_data = []
             for frame in data.frames:
+                # 注意：missing=0.0 是**特征填充**，不是"测得零值"。PostProcessor
+                # 的输入约定是稠密标量矩阵，缺失无法表达。待阶段 2 引入 valid mask。
                 frames_data.append({
-                    "contact": _sv2_scalar(frame, "contact"),
-                    "force_magnitude": _sv2_scalar(frame, "force_magnitude"),
-                    "slip_event": _sv2_scalar(frame, "slip_event"),
-                    "object_deformation": _sv2_scalar(frame, "object_deformation"),
+                    "contact": _sv2_scalar(frame, "contact", missing=0.0),
+                    "force_magnitude": _sv2_scalar(frame, "force_magnitude", missing=0.0),
+                    "slip_event": _sv2_scalar(frame, "slip_event", missing=0.0),
+                    "object_deformation": _sv2_scalar(frame, "object_deformation", missing=0.0),
                 })
 
             existing_phases = [f.manipulation_phase for f in data.frames]
@@ -351,7 +358,7 @@ class MLEngine:
                             frame.manipulation_phase = str(value)
                             applied += 1
                     else:
-                        old = _sv2_scalar(frame, field)
+                        old = _sv2_scalar(frame, field, missing=None)
                         if field == "contact" and isinstance(old, (int, float)):
                             if abs(old - value) < 0.05:
                                 continue

@@ -135,8 +135,8 @@ class DeformationForceEstimator(ForceEstimator):
         if not data.frames:
             return False
         for f in data.frames:
-            deform = _sv2_scalar(f, "object_deformation")
-            if deform > 0.01:
+            deform = _sv2_scalar(f, "object_deformation", missing=None)
+            if deform is not None and deform > 0.01:
                 return True
         return False
 
@@ -158,7 +158,10 @@ class DeformationForceEstimator(ForceEstimator):
 
         results = []
         for frame in data.frames:
-            deform = _sv2_scalar(frame, "object_deformation")
+            deform = _sv2_scalar(frame, "object_deformation", missing=None)
+            # P9：无形变数据 ≠ 无形变。缺失帧不产出估算，不能填成"估算力 0.0 N"
+            if deform is None:
+                continue
             if deform < 0.001:
                 results.append(ForceEstimate(
                     frame_idx=frame.frame_idx,

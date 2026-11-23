@@ -104,6 +104,9 @@ class QualityScorer:
         for frame in data.frames:
             sv2 = frame.schema_v2
             contact = 1.0 if sv2.contact else 0.0
+            # P9：这里把缺失填成 0.0 是**安全的**，因为下面所有规则都是
+            # "值 > 阈值才算违规"。缺失（无数据）不构成违规证据，填 0.0
+            # 等价于"不参与判定"，不会误报也不会漏报。
             force = sv2.force_magnitude if sv2.force_magnitude is not None else 0.0
             slip = 1.0 if sv2.slip_event else 0.0
             deformation = sv2.object_deformation if sv2.object_deformation is not None else 0.0
@@ -164,8 +167,14 @@ class QualityScorer:
         total_pairs = 0
 
         for key in SCALAR_DIMS:
-            values = [_sv2_scalar(f, key) for f in data.frames]
-            diffs = [abs(values[i+1] - values[i]) for i in range(len(values) - 1)]
+            # P9：缺失值不参与差分。此前缺失被填 0.0，会让"有值→无值"的边界
+            # 产生一个虚假的巨幅跳变，被算成时序突变。
+            values = [_sv2_scalar(f, key, missing=None) for f in data.frames]
+            diffs = [
+                abs(values[i + 1] - values[i])
+                for i in range(len(values) - 1)
+                if values[i] is not None and values[i + 1] is not None
+            ]
 
             if not diffs:
                 continue
