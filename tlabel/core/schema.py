@@ -6,7 +6,7 @@ TLabel Schema V2.1 — 14维结构化语义空间
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Mapping
 
 
 # 枚举值定义（字符串类型，方便JSON序列化）
@@ -292,10 +292,15 @@ class TLabelSchemaV2:
     # 验证
     # ================================================================
 
-    def validate(self) -> Tuple[bool, List[str]]:
-        """
-        验证 Schema 完整性与 compliance_level 一致性。
-        
+    def validate(self, capabilities: Optional[Mapping] = None) -> Tuple[bool, List[str]]:
+        """验证 Schema 完整性与 compliance_level 一致性。
+
+        Args:
+            capabilities: 可选。传入时额外做「能力声明 ↔ 帧值」交叉校验：
+                声明为 ``False`` 的维度，对应字段必须是 ``None``。
+                默认不启用，避免破坏既有 adapter；新 adapter 与符合性校验器
+                应显式传入。
+
         Returns:
             (is_valid, errors): is_valid=True 表示通过；errors 是错误消息列表。
         """
@@ -413,5 +418,23 @@ class TLabelSchemaV2:
         if self.raw_sensor_values is not None:
             if not isinstance(self.raw_sensor_values, dict):
                 errors.append("raw_sensor_values must be a dict")
+
+        # 12. capabilities 交叉校验（P1 / P14，可选）
+        #
+        # 打通"能力声明 ↔ 帧值"的第一条校验通道。一个维度若在 capabilities 中
+        # 声明为 False，说明该传感器不产出这个物理量，对应字段必须是 None。
+        # 填 False / 0.0 会把"没有这个能力"伪装成"测得没有 / 测得零"，
+        # 下游无法再区分（P14）。
+        if capabilities is not None:
+            for key, has_cap in capabilities.items():
+                if has_cap:
+                    continue
+                val = getattr(self, key, None)
+                if val is None:
+                    continue
+                errors.append(
+                    f"capability '{key}' is declared False, so the field must be None; "
+                    f"got {val!r} — do not fill 0.0/False to stand in for 'not measured'"
+                )
 
         return (len(errors) == 0, errors)

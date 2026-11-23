@@ -198,3 +198,54 @@ class TestScorerMissing:
         score = QualityScorer().score(data)
         assert score["temporal_smoothness"] >= 0.0
         assert score["physical_consistency"] >= 0.0
+
+
+# ============================================================
+# 6. capabilities 交叉校验（P1 / P14）
+# ============================================================
+
+def _caps_allow_all():
+    return {k: True for k in CAPABILITY_KEYS}
+
+
+class TestCapabilityCrossValidation:
+    """validate(capabilities=...) 打通「能力声明 ↔ 帧值」通道。
+
+    声明为 False 的维度必须输出 None。填 0.0 / False 等于把"没有这个能力"
+    写成"测得零 / 测得没有"，下游无法区分（P14）。
+    """
+
+    def test_all_declared_true_passes(self):
+        sv2 = TLabelSchemaV2(contact=True, contact_centroid=[0.5, 0.5], force_magnitude=1.2)
+        ok, errors = sv2.validate(capabilities=_caps_allow_all())
+        assert ok, errors
+
+    def test_declared_false_but_value_present_fails(self):
+        caps = _caps_allow_all()
+        caps["force_magnitude"] = False
+        sv2 = TLabelSchemaV2(contact=True, contact_centroid=[0.5, 0.5], force_magnitude=0.0)
+        ok, errors = sv2.validate(capabilities=caps)
+        assert not ok
+        assert any("force_magnitude" in e for e in errors)
+
+    def test_declared_false_and_none_passes(self):
+        caps = _caps_allow_all()
+        caps["force_magnitude"] = False
+        sv2 = TLabelSchemaV2(contact=True, contact_centroid=[0.5, 0.5], force_magnitude=None)
+        ok, errors = sv2.validate(capabilities=caps)
+        assert ok, errors
+
+    def test_declared_false_bool_field_fails(self):
+        """slip_event 声明无能力却填 False（"确定没滑移"）同样不允许。"""
+        caps = _caps_allow_all()
+        caps["slip_event"] = False
+        sv2 = TLabelSchemaV2(contact=True, contact_centroid=[0.5, 0.5], slip_event=False)
+        ok, errors = sv2.validate(capabilities=caps)
+        assert not ok
+        assert any("slip_event" in e for e in errors)
+
+    def test_without_capabilities_no_cross_check(self):
+        """默认不启用交叉校验，保持既有 adapter 兼容。"""
+        sv2 = TLabelSchemaV2(contact=True, contact_centroid=[0.5, 0.5], force_magnitude=0.0)
+        ok, errors = sv2.validate()
+        assert ok, errors
