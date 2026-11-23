@@ -467,10 +467,13 @@ def test_3_adapters_extract_schema():
         }
         schema = adapter.extract_schema(raw)
         assert isinstance(schema, TLabelSchemaV2)
-        assert schema.compliance_level == "L2", f"gelsight 无标定应为 L2, got {schema.compliance_level}"
+        # P9/T0-7：无标定力向量 → L1，且 force_magnitude 必须是 None
+        # （图像形变 RMS 不是力，不能填进单位 N 的字段）
+        assert schema.compliance_level == "L1", f"gelsight 无标定应为 L1, got {schema.compliance_level}"
         assert schema.force_vector is None, "无标定力时 force_vector 应为 None"
+        assert schema.force_magnitude is None, "无标定力时 force_magnitude 应为 None"
         record_test("3.3a gelsight extract_schema (无标定)", True,
-                     f"L2, force_vec=None")
+                     f"L1, force_mag=None, force_vec=None")
     except Exception as e:
         record_test("3.3a gelsight extract_schema (无标定)", False, str(e))
 
@@ -484,8 +487,11 @@ def test_3_adapters_extract_schema():
         schema = adapter.extract_schema(raw_with_force)
         assert schema.compliance_level == "L3", f"有标定力应为 L3, got {schema.compliance_level}"
         assert schema.force_vector == [1.0, 0.5, 3.0], f"force_vector 不正确: {schema.force_vector}"
+        # P9/T0-7：force_magnitude 取力向量模长（真实 SI 牛顿值），不是形变代理
+        assert abs(schema.force_magnitude - math.sqrt(10.25)) < 1e-6, \
+            f"force_magnitude 应为力向量模长, got {schema.force_magnitude}"
         record_test("3.3b gelsight extract_schema (有标定)", True,
-                     f"L3, force_vector={schema.force_vector}")
+                     f"L3, force_vector={schema.force_vector}, force_mag={schema.force_magnitude:.4f}")
     except Exception as e:
         record_test("3.3b gelsight extract_schema (有标定)", False, str(e))
 
@@ -499,9 +505,11 @@ def test_3_adapters_extract_schema():
         }
         schema = adapter.extract_schema(raw)
         assert isinstance(schema, TLabelSchemaV2)
-        assert schema.compliance_level == "L2", f"ycb_slide 应为 L2, got {schema.compliance_level}"
+        # P9/T0-6：ycb_slide 视觉形变 RMS 不是力 → L1，force_magnitude 为 None
+        assert schema.compliance_level == "L1", f"ycb_slide 应为 L1, got {schema.compliance_level}"
         assert schema.force_vector is None, "ycb_slide 无3D力, force_vector 应为 None"
-        record_test("3.4 ycb_slide extract_schema", True, "L2, force_vec=None")
+        assert schema.force_magnitude is None, "ycb_slide force_magnitude 应为 None"
+        record_test("3.4 ycb_slide extract_schema", True, "L1, force_mag=None, force_vec=None")
     except Exception as e:
         record_test("3.4 ycb_slide extract_schema", False, str(e))
 

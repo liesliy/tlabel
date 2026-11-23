@@ -5,6 +5,7 @@ GelSight/DIGIT 适配器 — 将force pkl数据转换为TLabelData
 DIGIT与GelSight共用此适配器（force数据集schema一致）。
 """
 
+import math
 import pickle
 import numpy as np
 from pathlib import Path
@@ -95,7 +96,7 @@ def _extract_tlabel_v2(diff_img, is_contact, delta_mag_shear=None,
                         contact_transition=0.0):
     """从单帧背景减除后的图像提取TLabel v2 22维特征"""
     empty = {k: 0.0 for k in [
-        "contact", "deformation_magnitude", "force_magnitude", "force_peak",
+        "contact", "deformation_magnitude", "force_peak",
         "force_direction", "slip_entropy", "slip_event", "texture_energy",
         "edge_density", "contact_area", "centroid_x",
         "normal_field_magnitude", "normal_field_variance",
@@ -116,7 +117,8 @@ def _extract_tlabel_v2(diff_img, is_contact, delta_mag_shear=None,
 
     contact = float(is_contact)
     deformation_mag = float(np.sqrt(np.mean(diff_img**2)))
-    force_mag = deformation_mag
+    # P9/T0-7：删掉 force_mag = deformation_mag 的别名。图像形变 RMS 不是力，
+    # 保留这个别名只会诱导下游把它当力用。
     force_peak = float(np.max(np.abs(gray)))
 
     if gray.max() > gray.min():
@@ -177,8 +179,10 @@ def _extract_tlabel_v2(diff_img, is_contact, delta_mag_shear=None,
     return {
         "contact": contact,
         "deformation_magnitude": round(deformation_mag, 4),
-        "force_magnitude": round(force_mag, 4),  # deprecated in v0.7, kept for backward compat
-        "deformation_magnitude_peak": round(force_mag, 4),  # v0.7: honest replacement for force_magnitude
+        # TODO(阶段2)：此值当前等于 deformation_magnitude（RMS），并非真正的
+        # 峰值，命名与值不符。改值会改动 22 维特征数值、影响既有 classifier
+        # 训练一致性，阶段 0 只做标记不改数值。
+        "deformation_magnitude_peak": round(deformation_mag, 4),
         "force_peak": round(force_peak, 4),
         "force_direction": round(force_dir, 2),
         "slip_entropy": round(slip_ent, 4),
@@ -232,10 +236,18 @@ def _infer_phases(frames_info):
 class GelSightAdapter(BaseAdapter):
     """GelSight/DIGIT force pkl → TLabelData
 
-    Compliance Level: L2（默认，无标定数据时）/ L3（有标定数据可提取 force_vector）
+    Compliance Level: L3（有标定力向量，`load()` 正常路径）/ L1（无标定数据）
+
+    P9/T0-7 修正：此前 ``force_magnitude`` 填的是 ``deformation_magnitude``
+    （图像强度 RMS，无量纲），而数据集本身就带标定力向量 ``traj["forces"]``
+    —— 放着真力数据不用，反而拿形变冒充力。现在改为：
+
+    - 有 ``force_vector_N``：``force_magnitude`` = 力向量模长（真实 SI 牛顿值），
+      ``compliance_level`` = L3
+    - 无：``force_magnitude`` = None，``compliance_level`` = L1
     """
 
-    default_compliance_level: str = "L2"
+    default_compliance_level: str = "L1"
 
     @property
     def name(self) -> str:
@@ -263,9 +275,9 @@ class GelSightAdapter(BaseAdapter):
                 - contact_transition: float（默认0.0）
 
         返回:
-            TLabelSchemaV2 — L2（默认）或 L3（有标定力向量时），
-            force_magnitude 从变形区域估算，force_vector 有标定数据则填，
-            object_deformation 从图像提取
+            TLabelSchemaV2 — L3（有标定力向量时）或 L1（无），
+            force_magnitude 取力向量模长（无标定数据时为 None），
+            object_deformation 从图像提取（图像强度 RMS，非 mm）
         """
         # 复用现有模块级 _extract_tlabel_v2 函数获取22维dict
         tlabel_v2 = _extract_tlabel_v2(
@@ -283,31 +295,43 @@ class GelSightAdapter(BaseAdapter):
 
         contact = float(tlabel_v2["contact"]) > 0.5
         centroid_x = tlabel_v2.get("centroid_x", 0.5)
+        deformation = float(tlabel_v2["deformation_magnitude"])
 
         # 判断是否有标定力向量 → 动态升级 compliance_level
         force_vector_N = raw_frame_data.get("force_vector_N")
         if force_vector_N is not None and len(force_vector_N) == 3:
             compliance_level = "L3"
             force_vector = [float(v) for v in force_vector_N]
+            # P9/T0-7：force_magnitude 从标定力向量取模长 —— 这才是真实的
+            # SI 牛顿值。此前这里填 deformation_magnitude（图像强度 RMS），
+            # 明明有真力数据却用形变代理。
+            force_magnitude = math.sqrt(sum(v * v for v in force_vector))
         else:
-            compliance_level = self.default_compliance_level  # L2
+            compliance_level = self.default_compliance_level
             force_vector = None
+            # P9/T0-7：无标定力数据时必须是 None。图像形变 RMS 不是力，
+            # 填进单位 N 的字段等于让下游把无量纲读数当牛顿值。
+            force_magnitude = None
 
         return TLabelSchemaV2(
             contact=contact,
             contact_centroid=[float(centroid_x), 0.5] if contact else None,
             contact_region=None,
-            force_magnitude=float(tlabel_v2["deformation_magnitude"]),
+            force_magnitude=force_magnitude,
             force_vector=force_vector,
             torque_vector=None,
             slip_event=float(tlabel_v2["slip_event"]) > 0.5,
             slip_velocity=None,
             manipulation_phase=None,
             texture_class=None,
-            object_deformation=float(tlabel_v2["deformation_magnitude"]),
+            object_deformation=deformation,  # 种类正确（形变），单位待 V3.0 规范
             temperature=None,
             confidence=0.8 if contact else 0.95,
             compliance_level=compliance_level,
+            raw_sensor_values={
+                "deformation_magnitude": round(deformation, 4),
+                "deformation_magnitude_unit": "image intensity RMS (dimensionless)",
+            },
         )
 
     def get_capabilities(self) -> Dict[str, bool]:
@@ -315,14 +339,18 @@ class GelSightAdapter(BaseAdapter):
 
         判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
         理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
-        视觉触觉（GelSight / DIGIT）。force_magnitude 是形变代理量、非 SI 标定值；
-        force_vector 仅在 pkl 携带 force_vector_N 时产出，属条件能力。
+        视觉触觉（GelSight / DIGIT）。
+
+        P9/T0-7：``force_magnitude`` 与 ``force_vector`` 都是**条件能力** ——
+        仅当 pkl 携带标定 ``force_vector_N`` 时产出（此时 force_magnitude 取
+        力向量模长）。``load()`` 正常路径总是带标定力，故声明为 True；
+        裸调 ``extract_schema()`` 且无标定数据时会退化为 None。
         """
         return {
             "contact": True,
             "contact_centroid": True,
             "contact_region": False,
-            "force_magnitude": True,  # 视觉形变代理，非标定牛顿值
+            "force_magnitude": True,  # 条件：由 force_vector_N 模长算出，非形变代理
             "force_vector": True,  # 条件：pkl 含 force_vector_N 时产出 3D 力
             "torque_vector": False,
             "slip_event": True,  # 图像梯度角方差代理，非物理滑移检测
