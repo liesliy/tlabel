@@ -41,3 +41,12 @@ tmp/
 *.tmp
 *.bak
 tlabel-v050-src/
+
+# Paper build outputs (只保留投稿版本，编译中间产物不入库)
+paper/*_fixed_*.pdf
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.synctex.gz

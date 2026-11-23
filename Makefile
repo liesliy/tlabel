@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test lint clean release
+.PHONY: help install install-dev test lint clean release pkgcheck
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -24,7 +24,10 @@ clean:  ## Remove build artifacts
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
-release: clean test  ## Build and publish to PyPI
+pkgcheck:  ## 发版前包内容审查：内部文档不得进 sdist/wheel
+	python scripts/check_package_contents.py
+
+release: clean test pkgcheck  ## Build and publish to PyPI
 	python -m build
 	twine upload dist/*
 
