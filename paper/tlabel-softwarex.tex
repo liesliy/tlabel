@@ -68,7 +68,7 @@ C1 & Current code version & v0.21.1 \\
 \hline
 C2 & Permanent link to code/repository used for this code version & \url{https://github.com/liesliy/tlabel/releases/tag/v0.21.1} \\
 \hline
-C4 & Legal Code License & Apache-2.0 \\
+C4 & Legal Code License & MIT \\
 \hline
 C5 & Code versioning system used & Git \\
 \hline
@@ -138,7 +138,7 @@ We demonstrate TLabel using three real-world public datasets (Table~\ref{tab:dat
 \textbf{Dataset} & \textbf{Level} & \textbf{Frames} & \textbf{Supported} & \textbf{Unsupported} & \textbf{Violations} \\
 \midrule
 BioTac BTS3~\cite{zapata2018biotac} & L2 & 1,276 & 6/14 & 8/14 & 0 \\
-YCB-Slide~\cite{suresh2022midastouch} & L1 & 3,661 & 6/14 & 8/14 & 0 \\
+YCB-Slide~\cite{suresh2022midastouch} & L2 & 3,661 & 6/14 & 8/14 & 0 \\
 Sparsh~\cite{kerr2024sparsh} & L3 & 10,740 & 8/14 & 6/14 & 0 \\
 \midrule
 \textbf{Total} & & \textbf{15,677} & & & \textbf{0} \\
@@ -147,7 +147,7 @@ Sparsh~\cite{kerr2024sparsh} & L3 & 10,740 & 8/14 & 6/14 & 0 \\
 \end{table}
 
 \textbf{Example 1: Boundary compliance.}
-For each dataset, we verify that fields outside the adapter's capability set~$C_A$ are \texttt{None} for all frames. We define the boundary compliance rate $B$ as the fraction of unsupported field assignments that are correctly \texttt{None}. Across all 15,677 frames, $B = 100\%$: BioTac sets 8 fields to \texttt{None} per frame (no spatial resolution); YCB-Slide degrades to L1 with 8/14 fields \texttt{None}; Sparsh populates 8/14 fields including full 3D force vectors matching ATI ground truth at 100\%.
+For each dataset, we verify that fields outside the adapter's capability set~$C_A$ are \texttt{None} for all frames. We define the boundary compliance rate $B$ as the fraction of unsupported field assignments that are correctly \texttt{None}. Across all 15,677 frames, $B = 100\%$: BioTac sets 8 fields to \texttt{None} per frame (no spatial resolution); YCB-Slide sets 8/14 fields to \texttt{None} (deformation-based force proxy, no 3D force vector); Sparsh populates 8/14 fields including full 3D force vectors matching ATI ground truth at 100\%.
 
 \begin{lstlisting}[language=Python]
 import tlabel
