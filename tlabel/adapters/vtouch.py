@@ -169,7 +169,7 @@ def _extract_tlabel_v2(diff_img, is_contact: bool,
     因为VTouch触觉传感器同样是vision-based tactile (GelSight系)。
     """
     empty = {k: 0.0 for k in [
-        "contact", "deformation_magnitude", "force_magnitude", "force_peak",
+        "contact", "deformation_magnitude", "force_peak",
         "force_direction", "slip_entropy", "slip_event", "texture_energy",
         "edge_density", "contact_area", "centroid_x",
         "normal_field_magnitude", "normal_field_variance",
@@ -186,7 +186,7 @@ def _extract_tlabel_v2(diff_img, is_contact: bool,
 
     contact = float(is_contact)
     deformation_mag = float(np.sqrt(np.mean(diff_img**2)))
-    force_mag = deformation_mag
+    # P9/T0-8：删掉 force_mag = deformation_mag 的别名。图像形变 RMS 不是力。
     force_peak = float(np.max(np.abs(gray)))
 
     if gray.max() > gray.min():
@@ -250,7 +250,6 @@ def _extract_tlabel_v2(diff_img, is_contact: bool,
     return {
         "contact": contact,
         "deformation_magnitude": round(deformation_mag, 4),
-        "force_magnitude": round(force_mag, 4),
         "force_peak": round(force_peak, 4),
         "force_direction": round(force_dir, 2),
         "slip_entropy": round(slip_ent, 4),
@@ -348,8 +347,9 @@ class VTouchAdapter(BaseAdapter):
 
         return None
 
-    # v0.17: Compliance Level L2 — VTouch有GelSight风格触觉，可从图像估算force_magnitude
-    default_compliance_level: str = "L2"
+    # P9/T0-8：原为 L2 —— 靠"从图像估算 force_magnitude"勉强满足 L2 的字段必填，
+    # 但那是形变 RMS 冒充牛顿值。VTouch 无力标定数据，实际能力是 L1。
+    default_compliance_level: str = "L1"
 
     @property
     def name(self) -> str:
@@ -364,20 +364,23 @@ class VTouchAdapter(BaseAdapter):
 
         判定口径：以 load() 实际产出的帧内容为准，不按 extract_schema 的
         理论能力。compliance_level 是帧级元字段，不属于能力键（S-7.4-2）。
-        VTouch（L2）。无力矢量数据；slip_velocity 由 optical flow 换算。
+        VTouch（L1）。无力标定数据；slip_velocity 由 optical flow 换算。
+
+        P9/T0-8：``force_magnitude`` 为 False —— 图像形变 RMS 不是力，
+        数据集不提供标定系数。
         """
         return {
             "contact": True,
             "contact_centroid": True,
             "contact_region": False,
-            "force_magnitude": True,  # GelSight 风格形变估算，非标定牛顿值
+            "force_magnitude": False,  # P9/T0-8：形变 RMS 不是力，无标定数据
             "force_vector": False,
             "torque_vector": False,
             "slip_event": True,
             "slip_velocity": True,  # 条件：slip_event 为真时由 optical flow 换算
             "manipulation_phase": True,
             "texture_class": False,
-            "object_deformation": True,  # 由 deformation_magnitude 映射
+            "object_deformation": True,  # 种类正确（形变），单位待 V3.0 规范
             "temperature": False,
             "confidence": True,
         }
@@ -392,13 +395,13 @@ class VTouchAdapter(BaseAdapter):
     def extract_schema(self, raw_frame_data: Union[TLabelFrame, Dict]) -> TLabelSchemaV2:
         """将原始数据帧转换为 TLabel Schema V2 (14维结构化)
 
-        VTouch适配器策略（L2）:
+        VTouch适配器策略（L1）:
           - contact: 从tlabel_v2.contact推断
           - contact_centroid: 从centroid_x估算 [cx, cy]
-          - force_magnitude: 从deformation估算（GelSight风格背景减除）
-          - force_vector: None（VTouch无力矢量数据，仅L2）
-          - object_deformation: 从deformation_magnitude提取
-          - compliance_level: L2
+          - force_magnitude: 恒 None（P9/T0-8：形变 RMS 不是力）
+          - force_vector: None（VTouch无力矢量数据）
+          - object_deformation: 从deformation_magnitude提取（图像 RMS，非 mm）
+          - compliance_level: L1
 
         Args:
             raw_frame_data: TLabelFrame实例或tlabel_v2字典
@@ -428,18 +431,27 @@ class VTouchAdapter(BaseAdapter):
         if centroid_x is not None and schema.contact:
             schema.contact_centroid = [float(centroid_x), 0.0]
 
-        # 2. force_magnitude: 从deformation估算（GelSight风格）
-        fm = v2_dict.get("force_magnitude")
-        if fm is not None and fm > 0:
-            schema.force_magnitude = float(fm)
+        # 2. force_magnitude: 恒 None（P9/T0-8）
+        #
+        # 此前从 deformation 估算（GelSight 风格背景减除），把图像强度 RMS
+        # 填进单位 N 的字段。VTouch 数据集不提供力标定系数，形变程度不是力。
+        # 这里显式置 None 也顺带挡住 from_tlabel_v1 用 force_magnitude +
+        # force_direction 合成 force_vector 的隐式路径。
+        schema.force_magnitude = None
 
         # 3. force_vector: VTouch无力矢量数据，保持None
         schema.force_vector = None
 
         # 4. object_deformation: 从deformation_magnitude提取
+        #    种类正确（形变程度），单位为图像强度 RMS 而非 mm，属单位体系问题，
+        #    留待 Schema V3.0 处理。原始值同时挂 raw_sensor_values。
         deform = v2_dict.get("deformation_magnitude")
         if deform is not None and deform > 0:
             schema.object_deformation = float(deform)
+            schema.raw_sensor_values = {
+                "deformation_magnitude": round(float(deform), 4),
+                "deformation_magnitude_unit": "image intensity RMS (dimensionless)",
+            }
 
         # 5. slip_velocity: 从optical_flow提取
         if schema.slip_event:
@@ -450,7 +462,7 @@ class VTouchAdapter(BaseAdapter):
                 schema.slip_velocity = [round(of_mag * math.cos(of_rad), 4),
                                         round(of_mag * math.sin(of_rad), 4)]
 
-        # 6. compliance_level: VTouch始终L2
+        # 6. compliance_level: VTouch始终 L1（P9/T0-8）
         schema.compliance_level = self.default_compliance_level
 
         return schema
