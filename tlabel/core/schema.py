@@ -18,6 +18,36 @@ VALID_COMPLIANCE_LEVELS = ("L1", "L2", "L3", "L4")
 # data_quality.level 枚举（Q1-Q4 用户自声明）
 VALID_DATA_QUALITY_LEVELS = ("Q1", "Q2", "Q3", "Q4")
 
+def _tristate(value: Any) -> Optional[bool]:
+    """把任意输入归一成 True / False / None。
+
+    v0.26（D8）：contact 与 slip_event 是三态字段。None 不是「假」，
+    而是「这个数据集或这一帧无法给出该判断」。`bool(None)` 会把它压成
+    False，那是把「不知道」谎报成「确定没有」，下游据此训练会学错。
+
+    字符串分支是为了 CSV 往返：导出时未知写成空字段，读回是空串，
+    `bool("")` 会得到 False——同一个坑换了个入口。这里把空串还原成
+    None，把 `"0"` / `"false"` 之类按字面理解，避免 `bool("0") == True`
+    这种反向错误。
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s == "":
+            return None
+        if s in ("true", "1", "1.0", "yes", "y", "t"):
+            return True
+        if s in ("false", "0", "0.0", "no", "n", "f"):
+            return False
+        raise ValueError(
+            f"无法把字符串 {value!r} 解释为三态布尔值；"
+            "期望 true/false/1/0 或空（空表示未知）"
+        )
+    return bool(value)
+
+
+
 # 14维字段名列表（有序）
 SCHEMA_V2_FIELD_NAMES = [
     "contact",
@@ -50,8 +80,11 @@ class TLabelSchemaV2:
     """
 
     # --- Required (无条件) ---
-    contact: bool = False
-    slip_event: bool = False
+    # v0.26（D8）：二态布尔装不下真实数据。None 表示「不知道」——
+    # 数据集没有该判断能力，或该帧无法判断。False 表示「确定的否」。
+    # 两者语义不同，不得互相替代。
+    contact: Optional[bool] = None
+    slip_event: Optional[bool] = None
     confidence: float = 1.0
     compliance_level: str = "L1"
 
@@ -160,13 +193,13 @@ class TLabelSchemaV2:
     def from_dict(cls, data: Dict[str, Any]) -> "TLabelSchemaV2":
         """从字典构建 TLabelSchemaV2"""
         return cls(
-            contact=bool(data.get("contact", False)),
+            contact=_tristate(data.get("contact")),
             contact_centroid=data.get("contact_centroid"),
             contact_region=data.get("contact_region"),
             force_magnitude=data.get("force_magnitude"),
             force_vector=data.get("force_vector"),
             torque_vector=data.get("torque_vector"),
-            slip_event=bool(data.get("slip_event", False)),
+            slip_event=_tristate(data.get("slip_event")),
             slip_velocity=data.get("slip_velocity"),
             manipulation_phase=data.get("manipulation_phase"),
             texture_class=data.get("texture_class"),
@@ -201,8 +234,12 @@ class TLabelSchemaV2:
           无法导出的字段填 None
           compliance_level 默认 "L1"
         """
-        # contact: v1 是 float 0/1, v2 是 bool
-        contact_val = float(v1_dict.get("contact", 0.0)) > 0.5
+        # contact: v1 是 float 0/1, v2 是三态 bool
+        # v0.26（D8）：源字段缺失或显式为 null 时必须保持 None。以前默认 0.0
+        # 会把「源数据没给这个判断」变成「确定没有接触」——那是凭空断言。
+        # 同时 float(None) 会直接抛 TypeError，这层防护一并解决。
+        _raw_contact = v1_dict.get("contact")
+        contact_val = None if _raw_contact is None else float(_raw_contact) > 0.5
 
         # contact_centroid: v1 有 centroid_x (归一化), 无 centroid_y → 填 None 或 [centroid_x, 0]
         centroid_x = v1_dict.get("centroid_x")
@@ -233,7 +270,9 @@ class TLabelSchemaV2:
                 force_vector = [round(fx, 4), round(fy, 4), round(fz, 4)]
 
         # slip_event
-        slip_val = float(v1_dict.get("slip_event", 0.0)) > 0.5
+        # v0.26（D8）：同上，缺失保持 None 而不是断言「没滑」。
+        _raw_slip = v1_dict.get("slip_event")
+        slip_val = None if _raw_slip is None else float(_raw_slip) > 0.5
 
         # slip_velocity: v1 的 slip_direction 是角度 → 转单位速度向量
         slip_velocity = None
@@ -307,10 +346,10 @@ class TLabelSchemaV2:
         errors: List[str] = []
 
         # 1. Required 字段检查
-        if not isinstance(self.contact, bool):
-            errors.append("contact must be bool")
-        if not isinstance(self.slip_event, bool):
-            errors.append("slip_event must be bool")
+        if self.contact is not None and not isinstance(self.contact, bool):
+            errors.append("contact must be bool or None")
+        if self.slip_event is not None and not isinstance(self.slip_event, bool):
+            errors.append("slip_event must be bool or None")
 
         # 2. confidence 范围
         if not (0.0 <= self.confidence <= 1.0):
@@ -323,7 +362,7 @@ class TLabelSchemaV2:
             )
 
         # 4. contact=true 时 contact_centroid 不能为 null
-        if self.contact and self.contact_centroid is None:
+        if self.contact is True and self.contact_centroid is None:
             errors.append("contact_centroid is required when contact=true")
 
         # 5. contact_centroid 维度检查

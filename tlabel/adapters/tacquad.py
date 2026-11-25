@@ -511,9 +511,12 @@ class TacQuadAdapter(BaseAdapter):
             )
 
         # Infer manipulation phases
+        # v0.26（D8）：contact / slip_event 是三态，`None > 0.5` 会抛 TypeError。
+        # 只有明确的 True 才算接触/滑移；未知不参与阶段推断（阶段推断靠的是
+        # 确定的信号，把「不知道」当成「没有」会让 phase 判错）。
         frames_info = [
-            {"is_contact": f.contact > 0.5,
-             "is_slip": f.slip_event > 0.5}
+            {"is_contact": f.contact is True,
+             "is_slip": f.slip_event is True}
             for f in all_frames
         ]
         phases = _infer_phases(frames_info)

@@ -57,3 +57,10 @@ include = ["tlabel*"]
 [tool.setuptools.package-data]
 tlabel = ["demo_data/*.json", "scenarios/*.yaml"]
 
+[tool.pytest.ini_options]
+# 裸跑 pytest 时只收集主测试树。
+# contrib/adapter-template 是独立模板项目（自带 pyproject.toml 与 `adapter` 包），
+# 不在主仓库的 import 路径上；被一起收集会在 collect 阶段报
+# ModuleNotFoundError: No module named 'adapter'，让整轮测试中断。
+# 模板自身怎么测，见 contrib/adapter-template/README.md。
+testpaths = ["tests"]

@@ -380,7 +380,9 @@ class VTouchAdapter(BaseAdapter):
             "slip_velocity": True,  # 条件：slip_event 为真时由 optical flow 换算
             "manipulation_phase": True,
             "texture_class": False,
-            "object_deformation": True,  # 种类正确（形变），单位待 V3.0 规范
+            # v0.26（V3.0 对齐）：图像 RMS 不是毫米，不再声明形变能力。
+            # 原值见 sensor_specific.deformation_image_rms（unit="1"）。
+            "object_deformation": False,
             "temperature": False,
             "confidence": True,
         }
@@ -442,12 +444,14 @@ class VTouchAdapter(BaseAdapter):
         # 3. force_vector: VTouch无力矢量数据，保持None
         schema.force_vector = None
 
-        # 4. object_deformation: 从deformation_magnitude提取
-        #    种类正确（形变程度），单位为图像强度 RMS 而非 mm，属单位体系问题，
-        #    留待 Schema V3.0 处理。原始值同时挂 raw_sensor_values。
+        # 4. object_deformation: 恒为 None。
+        #    v0.26（V3.0 对齐）：以前这里填图像强度 RMS —— 无量纲，而
+        #    object_deformation 的单位是 mm、语义是「物体形变」。相机看到的是
+        #    弹性体亮度变化，不是物体被压下去多少毫米。原值保留在
+        #    raw_sensor_values，并由帧级 sensor_specific.deformation_image_rms
+        #    携带单位与方法标识。
         deform = v2_dict.get("deformation_magnitude")
         if deform is not None and deform > 0:
-            schema.object_deformation = float(deform)
             schema.raw_sensor_values = {
                 "deformation_magnitude": round(float(deform), 4),
                 "deformation_magnitude_unit": "image intensity RMS (dimensionless)",
@@ -707,12 +711,26 @@ class VTouchAdapter(BaseAdapter):
             if gripper_positions is not None and i < len(gripper_positions):
                 sensor_specific["gripper_positions"] = [round(float(x), 4) for x in gripper_positions[i]]
 
+            schema_v2 = self.extract_schema(tlabel_v2)
+
+            # v0.26（V3.0 对齐）：图像强度 RMS 搬进 sensor_specific。
+            # 它是派生特征而非原始读数，所以不进 raw_sensor_values 当原始值；
+            # 但它确实是有用的滑动信号，直接丢是浪费。unit="1" 表明无量纲。
+            _rms = (schema_v2.raw_sensor_values or {}).get("deformation_magnitude")
+            if _rms is not None:
+                sensor_specific["deformation_image_rms"] = {
+                    "value": _rms,
+                    "unit": "1",
+                    "method_id": "vtouch:frame_diff_rms_v2",
+                    "namespace": "image_intensity",
+                }
+
             frame = TLabelFrame(
                 frame_idx=i,
                 timestamp_s=round(i * dt, 4),
                 # 走 extract_schema 而不是裸 from_tlabel_v1：后者会丢掉
                 # slip_velocity 提取和 compliance_level（恒写 L1）等增强。
-                schema_v2=self.extract_schema(tlabel_v2),
+                schema_v2=schema_v2,
                 manipulation_phase=phases[i],
                 confidence=confidence,
                 sensor_specific=sensor_specific,

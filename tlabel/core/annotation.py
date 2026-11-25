@@ -252,18 +252,27 @@ def annotate_events_from_data(data, clear_existing: bool = False) -> int:
     forces = [f.force_magnitude for f in frames]
 
     # --- contact_onset / contact_loss ---
+    # v0.26（D8）：contact 是三态。None 是「不知道」，既不能当接触也不能当
+    # 非接触 —— `not None` 为 True，以前会把「未知→True」误判成一次接触开始，
+    # 把「True→未知」误判成一次接触丢失，凭空生成事件。
     for i in range(1, n):
-        if contacts[i] and not contacts[i - 1]:
+        prev_c, curr_c = contacts[i - 1], contacts[i]
+        if prev_c is None or curr_c is None:
+            continue
+        if curr_c is True and prev_c is False:
             data.add_event("contact_onset", frame_idx=i, source="ai_predicted")
             count += 1
-        elif not contacts[i] and contacts[i - 1]:
+        elif curr_c is False and prev_c is True:
             data.add_event("contact_loss", frame_idx=i, source="ai_predicted")
             count += 1
 
     # --- slip (区间事件) ---
     slip_start = None
     for i in range(n):
-        if slips[i] and contacts[i]:
+        # v0.26（D8）：只有明确的 True 才构成滑移区间证据。未知帧落入 else
+        # 分支结束区间 —— 这与「缺失值不构成滑移持续的证据」一致，
+        # 但绝不能把未知读成「没滑」再反推出一个 slip 事件。
+        if slips[i] is True and contacts[i] is True:
             if slip_start is None:
                 slip_start = i
         else:
@@ -315,7 +324,12 @@ def annotate_events_from_data(data, clear_existing: bool = False) -> int:
 
     stable_start = None
     for i in range(n):
-        if contacts[i] and not slips[i]:
+        # v0.26（D8）：稳定抓握要求「确定接触」。滑移侧用 `is not True`：
+        # 滑移未知（None）不等于「正在滑」，不构成排除证据 —— 若要求
+        # `is False`，所有未产出滑移判据的数据集都会永久丧失 stable_grip
+        # 能力，那是把「没测」当成了「测出没问题」的反面。只有明确的
+        # True（确实在滑）才排除稳定抓握。
+        if contacts[i] is True and slips[i] is not True:
             if stable_start is None:
                 stable_start = i
             # 检查力波动（只用真实存在的力值）

@@ -259,7 +259,9 @@ class TestMissingSchemaFields:
         schema = TLabelSchemaV2.from_dict({"contact": True})
         assert schema.contact is True
         # 缺失字段的默认值
-        assert schema.slip_event is False  # bool 默认 False
+        # v0.26（D8）：slip_event 是三态字段，缺失时是 None（不知道），
+        # 不是 False（确定没滑）。两者语义不同，不得互换。
+        assert schema.slip_event is None
         assert schema.confidence == 1.0
         assert schema.compliance_level == "L1"
         assert schema.contact_centroid is None

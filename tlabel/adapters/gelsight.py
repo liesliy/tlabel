@@ -277,7 +277,8 @@ class GelSightAdapter(BaseAdapter):
         返回:
             TLabelSchemaV2 — L3（有标定力向量时）或 L1（无），
             force_magnitude 取力向量模长（无标定数据时为 None），
-            object_deformation 从图像提取（图像强度 RMS，非 mm）
+            object_deformation 恒为 None（图像强度 RMS 无量纲，不是毫米；
+            原值见帧级 sensor_specific.deformation_image_rms）
         """
         # 复用现有模块级 _extract_tlabel_v2 函数获取22维dict
         tlabel_v2 = _extract_tlabel_v2(
@@ -324,7 +325,12 @@ class GelSightAdapter(BaseAdapter):
             slip_velocity=None,
             manipulation_phase=None,
             texture_class=None,
-            object_deformation=deformation,  # 种类正确（形变），单位待 V3.0 规范
+            # v0.26（V3.0 对齐）：这里以前填的是图像强度 RMS —— 无量纲，
+            # 而 object_deformation 的单位是 mm，语义是「物体形变」。
+            # 相机看到的是传感器弹性体的亮度变化，不是物体被压下去多少毫米。
+            # 填进去等于把无量纲读数当长度交给下游。原值移到
+            # sensor_specific.deformation_image_rms，并带上单位与方法标识。
+            object_deformation=None,
             temperature=None,
             confidence=0.8 if contact else 0.95,
             compliance_level=compliance_level,
@@ -357,7 +363,9 @@ class GelSightAdapter(BaseAdapter):
             "slip_velocity": False,
             "manipulation_phase": True,
             "texture_class": False,
-            "object_deformation": True,  # 由 deformation_magnitude 映射
+            # v0.26（V3.0 对齐）：图像 RMS 不是毫米，不再声明形变能力。
+            # 原值见 sensor_specific.deformation_image_rms（unit="1"）。
+            "object_deformation": False,
             "temperature": False,
             "confidence": True,
         }
@@ -532,10 +540,25 @@ class GelSightAdapter(BaseAdapter):
                 "contact_transition": contact_trans,
             }
 
+            schema_v2 = self.extract_schema(raw_frame_for_schema)
+
+            # v0.26（V3.0 对齐）：图像强度 RMS 搬进 sensor_specific。
+            # 它是派生特征（不是原始读数），所以不能进 raw_sensor_values 当原始值；
+            # 但它确实是有用的滑动/形变信号，直接丢掉是浪费。
+            # unit="1" 明确它是无量纲，method_id 让复现者知道怎么算出来的。
+            _rms = (schema_v2.raw_sensor_values or {}).get("deformation_magnitude")
+            if _rms is not None:
+                sensor_specific["deformation_image_rms"] = {
+                    "value": _rms,
+                    "unit": "1",
+                    "method_id": "gelsight:frame_diff_rms_v2",
+                    "namespace": "image_intensity",
+                }
+
             frame = TLabelFrame(
                 frame_idx=gidx,
                 timestamp_s=round(gidx / sample_rate, 4),  # 修复: 用实际采样率替代硬编码 30.0
-                schema_v2=self.extract_schema(raw_frame_for_schema),  # 修复P0: 用 extract_schema 替代 from_tlabel_v1
+                schema_v2=schema_v2,
                 manipulation_phase=phases[i],
                 confidence=confidence,
                 sensor_specific=sensor_specific,

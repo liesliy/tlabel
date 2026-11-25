@@ -106,18 +106,28 @@ class PredictEngine:
         self._stats = {}
         for key in self._STAT_FIELDS:
             # P9：缺失值不参与统计
-            raw = [_sv2_scalar(f, key, missing=None) for f in data.frames]
-            values = [v for v in raw if v is not None]
-            if not values:
+            # v0.26：保留 (值, 帧) 配对后再过滤。以前是过滤出 values 再
+            # zip(data.frames)——中间只要有一帧缺失，后面的配对全部错位，
+            # 算出来的 contact_mean / no_contact_mean 是错的。
+            pairs = [
+                (v, f) for v, f in
+                zip((_sv2_scalar(f, key, missing=None) for f in data.frames), data.frames)
+                if v is not None
+            ]
+            if not pairs:
                 continue
+            values = [v for v, _ in pairs]
             mean = sum(values) / len(values)
             var = sum((v - mean) ** 2 for v in values) / len(values)
             std = math.sqrt(var)
             sorted_vals = sorted(values)
             q25 = sorted_vals[len(sorted_vals) // 4]
             q75 = sorted_vals[3 * len(sorted_vals) // 4]
-            contact_count = max(1, sum(1 for f in data.frames if f.contact > 0.5))
-            no_contact_count = max(1, sum(1 for f in data.frames if f.contact <= 0.5))
+            # v0.26（D8）：contact 是三态，`None > 0.5` 会抛 TypeError。
+            # 未知帧既不进「接触」组也不进「非接触」组——把它塞进任何一边
+            # 都会让该组的均值偏离真实分布。
+            contact_count = max(1, sum(1 for f in data.frames if f.contact is True))
+            no_contact_count = max(1, sum(1 for f in data.frames if f.contact is False))
             self._stats[key] = {
                 "mean": mean,
                 "std": std,
@@ -126,8 +136,8 @@ class PredictEngine:
                 "q25": q25,
                 "q75": q75,
                 "iqr": q75 - q25,
-                "contact_mean": sum(v for v, f in zip(values, data.frames) if f.contact > 0.5) / contact_count,
-                "no_contact_mean": sum(v for v, f in zip(values, data.frames) if f.contact <= 0.5) / no_contact_count,
+                "contact_mean": sum(v for v, f in pairs if f.contact is True) / contact_count,
+                "no_contact_mean": sum(v for v, f in pairs if f.contact is False) / no_contact_count,
             }
         return self
 
@@ -492,7 +502,9 @@ class PredictEngine:
             if prev_contact is None or curr_contact is None:
                 continue
 
-            if prev_contact <= 0.3 and curr_contact > 0.5:
+            # v0.26（D8）：contact 是三态。上面已排除 None，这里只剩 True/False，
+            # 用显式布尔判定，避免残留「> 0.5」这种把布尔当概率读的旧写法。
+            if prev_contact is False and curr_contact is True:
                 events.append({
                     "event_type": "contact_onset",
                     "frame_idx": frame_idx,
@@ -500,7 +512,7 @@ class PredictEngine:
                     "source": "ai_predicted",
                     "metadata": {"prev_contact": prev_contact, "curr_contact": curr_contact},
                 })
-            elif prev_contact > 0.5 and curr_contact <= 0.3:
+            elif prev_contact is True and curr_contact is False:
                 events.append({
                     "event_type": "contact_loss",
                     "frame_idx": frame_idx,
@@ -511,11 +523,10 @@ class PredictEngine:
 
         # ── 2. slip (区间事件) ──
         slip_start = None
-        slip_threshold = 0.3
         for i in range(n):
             # 缺失值不构成"滑移持续"的证据，落入 else 分支结束区间
-            if (slips[i] is not None and slips[i] > slip_threshold
-                    and contacts[i] is not None and contacts[i] > 0.5):
+            if (slips[i] is True
+                    and contacts[i] is True):
                 if slip_start is None:
                     slip_start = i
             else:

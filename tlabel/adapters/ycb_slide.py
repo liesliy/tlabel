@@ -303,7 +303,10 @@ class YCBSlideAdapter(BaseAdapter):
             slip_velocity=None,
             manipulation_phase=None,
             texture_class=None,
-            object_deformation=deformation,  # 形变种类正确，单位待 V3.0 规范
+            # v0.26（V3.0 对齐）：图像强度 RMS 无量纲，而 object_deformation
+            # 单位是 mm。原值见 raw_sensor_values 与帧级
+            # sensor_specific.deformation_image_rms。
+            object_deformation=None,
             temperature=None,
             confidence=0.95 if not contact else 0.8,
             compliance_level=self.default_compliance_level,
@@ -333,7 +336,8 @@ class YCBSlideAdapter(BaseAdapter):
             "slip_velocity": False,
             "manipulation_phase": True,
             "texture_class": False,
-            "object_deformation": True,  # 由 deformation_magnitude 映射
+            # v0.26（V3.0 对齐）：图像 RMS 不是毫米，不再声明形变能力。
+            "object_deformation": False,
             "temperature": False,
             "confidence": True,  # heuristic：按接触状态写死 0.95/0.8
         }
@@ -561,10 +565,20 @@ class YCBSlideAdapter(BaseAdapter):
                     if img_path:
                         sensor_specific["digit_image_path"] = img_path
 
+                    schema_v2 = self._v2_to_schema_v2(tlabel_v2)
+                    # v0.26（V3.0 对齐）：无量纲形变量搬进 sensor_specific。
+                    _rms = (schema_v2.raw_sensor_values or {}).get("deformation_magnitude")
+                    if _rms is not None:
+                        sensor_specific["deformation_image_rms"] = {
+                            "value": _rms, "unit": "1",
+                            "method_id": "ycb_slide:frame_diff_rms_v2",
+                            "namespace": "image_intensity",
+                        }
+
                     frame = TLabelFrame(
                         frame_idx=frame_offset + i,
                         timestamp_s=round(ts, 4),
-                        schema_v2=self._v2_to_schema_v2(tlabel_v2),
+                        schema_v2=schema_v2,
                         manipulation_phase=phase,
                         confidence=confidence,
                         sensor_specific=sensor_specific,
@@ -613,9 +627,10 @@ class YCBSlideAdapter(BaseAdapter):
             "num_objects": len(set(s["object_name"] for s in sequences_meta)),
             "stats": {
                 "total_frames": len(all_frames),
+                # v0.26（D8）：三态字段，只有明确的 True 才算接触帧。
                 "contact_frames": sum(
                     1 for f in all_frames
-                    if f.contact > 0.5
+                    if f.contact is True
                 ),
             }
         }
@@ -743,10 +758,20 @@ class YCBSlideAdapter(BaseAdapter):
                     if sensor_pose_gt:
                         sensor_specific["sensor_pose_gt"] = sensor_pose_gt
 
+                    schema_v2 = self._v2_to_schema_v2(tlabel_v2)
+                    # v0.26（V3.0 对齐）：无量纲形变量搬进 sensor_specific。
+                    _rms = (schema_v2.raw_sensor_values or {}).get("deformation_magnitude")
+                    if _rms is not None:
+                        sensor_specific["deformation_image_rms"] = {
+                            "value": _rms, "unit": "1",
+                            "method_id": "ycb_slide:frame_diff_rms_v2",
+                            "namespace": "image_intensity",
+                        }
+
                     frame = TLabelFrame(
                         frame_idx=frame_offset + i,
                         timestamp_s=round(ts, 4),
-                        schema_v2=self._v2_to_schema_v2(tlabel_v2),
+                        schema_v2=schema_v2,
                         manipulation_phase=phase,
                         confidence=confidence,
                         sensor_specific=sensor_specific,
@@ -790,9 +815,10 @@ class YCBSlideAdapter(BaseAdapter):
             "num_objects": len(set(s["object_name"] for s in sequences_meta)),
             "stats": {
                 "total_frames": len(all_frames),
+                # v0.26（D8）：三态字段，只有明确的 True 才算接触帧。
                 "contact_frames": sum(
                     1 for f in all_frames
-                    if f.contact > 0.5
+                    if f.contact is True
                 ),
             }
         }

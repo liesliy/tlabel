@@ -961,7 +961,9 @@ class DaimonAdapter(BaseAdapter):
             "slip_velocity": True,  # 条件：有 optical flow 时换算滑移速度
             "manipulation_phase": True,
             "texture_class": False,
-            "object_deformation": True,  # 种类正确（形变），单位待 V3.0 规范
+            # v0.26（V3.0 对齐）：图像 RMS 不是毫米，不再声明形变能力。
+            # 原值见 sensor_specific.deformation_image_rms（unit="1"）。
+            "object_deformation": False,
             "temperature": False,
             "confidence": True,
         }
@@ -1023,12 +1025,12 @@ class DaimonAdapter(BaseAdapter):
         schema.force_vector = None
         schema.compliance_level = self.default_compliance_level
 
-        # 3. object_deformation: 从deformation_magnitude直接提取
-        #    种类正确（形变程度），单位为图像强度 RMS 而非 mm，属单位体系问题，
-        #    留待 Schema V3.0 处理。原始值同时挂 raw_sensor_values。
+        # 3. object_deformation: 恒为 None。
+        #    v0.26（V3.0 对齐）：图像强度 RMS 是无量纲，而 object_deformation
+        #    的单位是 mm。原值保留在 raw_sensor_values，并由帧级
+        #    sensor_specific.deformation_image_rms 携带单位与方法标识。
         deform = v2_dict.get("deformation_magnitude")
         if deform is not None and deform > 0:
-            schema.object_deformation = float(deform)
             schema.raw_sensor_values = {
                 "deformation_magnitude": round(float(deform), 4),
                 "deformation_magnitude_unit": "image intensity RMS (dimensionless)",
@@ -1314,12 +1316,25 @@ class DaimonAdapter(BaseAdapter):
 
             confidence = self._compute_confidence(tlabel_v2, video_available)
 
+            schema_v2 = self.extract_schema(tlabel_v2)
+
+            # v0.26（V3.0 对齐）：图像强度 RMS 搬进 sensor_specific。
+            # 它是派生特征而非原始读数，不进 raw_sensor_values；unit="1" 表明无量纲。
+            _rms = (schema_v2.raw_sensor_values or {}).get("deformation_magnitude")
+            if _rms is not None:
+                sensor_specific["deformation_image_rms"] = {
+                    "value": _rms,
+                    "unit": "1",
+                    "method_id": "daimon:deformation_rms_v2",
+                    "namespace": "image_intensity",
+                }
+
             frame = TLabelFrame(
                 frame_idx=int(frame_indices[i]),
                 timestamp_s=round(float(timestamps[i]) if timestamps is not None else i / fps, 4),
                 # 走 extract_schema 而不是裸 from_tlabel_v1：后者会丢掉
                 # shear 合成 force_vector、slip_velocity 和 compliance_level 增强。
-                schema_v2=self.extract_schema(tlabel_v2),
+                schema_v2=schema_v2,
                 manipulation_phase="idle",
                 confidence=confidence,
                 sensor_specific=sensor_specific,
@@ -1407,7 +1422,9 @@ class DaimonAdapter(BaseAdapter):
             "phase_counts": {},
         }
         n_contact = 0
+        n_contact_unknown = 0
         n_slip = 0
+        n_slip_unknown = 0
         first_ts = None
         last_ts = None
         phase_counts: Dict[str, int] = {}
@@ -1417,10 +1434,18 @@ class DaimonAdapter(BaseAdapter):
             agg["num_frames"] += 1
             sv = getattr(frame, "schema_v2", None)
             if sv is not None:
-                if bool(getattr(sv, "contact", False)):
+                # v0.26（D8）：三态字段。bool(None) 会得到 False，把「不知道」
+                # 静默计入「非接触」，统计出的接触率因此偏低且无从察觉。
+                c = getattr(sv, "contact", None)
+                if c is True:
                     n_contact += 1
-                if bool(getattr(sv, "slip_event", False)):
+                elif c is None:
+                    n_contact_unknown += 1
+                s = getattr(sv, "slip_event", None)
+                if s is True:
                     n_slip += 1
+                elif s is None:
+                    n_slip_unknown += 1
             phase_counts[frame.manipulation_phase] = phase_counts.get(frame.manipulation_phase, 0) + 1
             if first_ts is None:
                 first_ts = frame.timestamp_s
@@ -1432,6 +1457,11 @@ class DaimonAdapter(BaseAdapter):
         if total:
             agg["contact_ratio"] = round(n_contact / total, 6)
             agg["slip_ratio"] = round(n_slip / total, 6)
+            # v0.26（D8）：未知帧单独报数。ratio 的分母仍是全部帧（数据不完整
+            # 就该体现在比例里），但把未知量单列出来，让下游能区分
+            # 「接触很少」和「大量帧根本不知道有没有接触」。
+            agg["contact_unknown_frames"] = n_contact_unknown
+            agg["slip_unknown_frames"] = n_slip_unknown
             if first_ts is not None and last_ts is not None:
                 agg["duration_s"] = round(float(last_ts - first_ts), 6)
         agg["phase_counts"] = phase_counts

@@ -289,8 +289,9 @@ class UniVTACAdapter(BaseAdapter):
 
         # 构建 TLabelData
         sensor_cfg = SENSOR_CONFIG[sensor_id]
+        # v0.26（D8）：三态字段，只有明确的 True 才算接触帧。
         contact_count = sum(
-            1 for fr in frames if fr.contact > 0.5
+            1 for fr in frames if fr.contact is True
         )
 
         sensor_info = {

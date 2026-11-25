@@ -791,10 +791,18 @@ def generate_panel_html(
     const frames = data.frames || [];
     document.getElementById(tid + '-stat-frames').textContent = frames.length;
     document.getElementById(tid + '-stat-duration').textContent = data.duration_s ? data.duration_s.toFixed(1) + 's' : '0s';
-    const contactCount = frames.filter(f => (f.schema_v2 || {{}}).contact > 0.5).length;
-    const slipCount = frames.filter(f => (f.schema_v2 || {{}}).slip_event > 0.5).length;
-    document.getElementById(tid + '-stat-contact').textContent = frames.length ? (contactCount / frames.length * 100).toFixed(1) + '%' : '0%';
-    document.getElementById(tid + '-stat-slip').textContent = frames.length ? (slipCount / frames.length * 100).toFixed(1) + '%' : '0%';
+    // v0.26（D8）：contact / slip_event 是三态。JS 里 `null > 0.5` 为 false，
+    // 未知帧会静默消失，显示出的接触率因此偏低且无从察觉。
+    // 只有明确的 true 才计入，未知帧单独报数。
+    const contactCount = frames.filter(f => (f.schema_v2 || {{}}).contact === true).length;
+    const slipCount = frames.filter(f => (f.schema_v2 || {{}}).slip_event === true).length;
+    const contactUnknown = frames.filter(f => (f.schema_v2 || {{}}).contact == null).length;
+    const slipUnknown = frames.filter(f => (f.schema_v2 || {{}}).slip_event == null).length;
+    const pct = (n) => frames.length ? (n / frames.length * 100).toFixed(1) + '%' : '0%';
+    document.getElementById(tid + '-stat-contact').textContent =
+      pct(contactCount) + (contactUnknown ? ' (' + contactUnknown + ' unknown)' : '');
+    document.getElementById(tid + '-stat-slip').textContent =
+      pct(slipCount) + (slipUnknown ? ' (' + slipUnknown + ' unknown)' : '');
     document.getElementById(tid + '-stat-modified').textContent = modifiedCount;
     document.getElementById(tid + '-sensor-info').textContent = data.sensor_info ? data.sensor_info.type : '';
   }}
@@ -988,10 +996,13 @@ def generate_panel_html(
 
     for (let i = 0; i < frames.length; i++) {{
       const tv2 = frames[i].schema_v2 || {{}};
-      const contact = tv2.contact || 0;
-      const slip = tv2.slip_event || 0;
-      if (slip > 0.5) ctx.fillStyle = '#ff6b6b';
-      else if (contact > 0.5) ctx.fillStyle = '#51cf66';
+      // v0.26（D8）：`|| 0` 会把 null（未知）压成 0，画成「确定无接触」。
+      // 未知单独给一档颜色，让它在一屏里看得出来。
+      const contact = tv2.contact;
+      const slip = tv2.slip_event;
+      if (slip === true) ctx.fillStyle = '#ff6b6b';
+      else if (contact === true) ctx.fillStyle = '#51cf66';
+      else if (contact == null) ctx.fillStyle = '#adb5bd';
       else ctx.fillStyle = '#dee2e6';
       ctx.fillRect(i * barW, 0, Math.max(barW, 1), H);
     }}
@@ -1218,7 +1229,10 @@ def generate_panel_html(
       // v0.17: Schema V2 字段优先，回退旧字段名
       var sv2 = frames[i].schema_v2 || null;
       var force = sv2 ? (sv2.force_magnitude || 0) : (tv2.force_magnitude || 0);
-      var contact = sv2 ? (sv2.contact || 0) : (tv2.contact || 0);
+      // v0.26（D8）：保留三态。`|| 0` 会把未知压成 0，下面 "contact < 0.3"
+      // 于是把未知帧判成 reach —— 凭空产出一个原语标注。
+      var contact = sv2 ? sv2.contact : tv2.contact;
+      if (contact === undefined) contact = null;
       var deform = sv2 ? (sv2.object_deformation || 0) : 0;
       var shear = sv2 && sv2.force_vector ? Math.sqrt(sv2.force_vector[0]**2 + sv2.force_vector[1]**2) : 0;  // V2: shear from force_vector horizontal components
       
@@ -1238,9 +1252,9 @@ def generate_panel_html(
       var primitive = null;
       var conf = 0;
       
-      if (contact < 0.3 && force < 0.1) {{
+      if (contact === false && force < 0.1) {{
         primitive = 'reach'; conf = 0.65;
-      }} else if (contact > 0.5) {{
+      }} else if (contact === true) {{
         if (avgFd > 0.05) {{
           if (deform > 0.2) {{ primitive = 'grasp'; conf = 0.6; }}
           else {{ primitive = 'press'; conf = 0.55; }}

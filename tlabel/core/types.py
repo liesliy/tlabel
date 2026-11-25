@@ -12,7 +12,7 @@ import math
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from tlabel.core.schema import TLabelSchemaV2, SCHEMA_V2_FIELD_NAMES
+from tlabel.core.schema import TLabelSchemaV2, SCHEMA_V2_FIELD_NAMES, _tristate
 from tlabel.core.capabilities import (
     normalize_capabilities,
     warn_if_invalid_capabilities,
@@ -104,12 +104,18 @@ class TLabelFrame:
         self.primitive_confidence = primitive_confidence  # v0.13: 置信度
 
     @property
-    def contact(self) -> bool:
-        return bool(self.schema_v2.contact)
+    def contact(self) -> Optional[bool]:
+        """接触状态。True / False / None（未知）。
+
+        v0.26（D8）：None 与 False 是两件事。None 表示该数据集或该帧
+        无法给出接触判断；把它读成 False 等于凭空断言「没有接触」。
+        """
+        return self.schema_v2.contact
 
     @property
-    def slip_event(self) -> bool:
-        return bool(self.schema_v2.slip_event)
+    def slip_event(self) -> Optional[bool]:
+        """滑移状态。True / False / None（未知）。语义同 contact。"""
+        return self.schema_v2.slip_event
 
     @property
     def force_magnitude(self) -> Optional[float]:
@@ -138,11 +144,17 @@ class TLabelFrame:
             "old_value": old_value,
             "new_value": new_value,
         }
-        # 写入 schema_v2 字段
+        # 写入 schema_v2 字段。
+        # v0.26（D8）：三态字段先归一化，并让级联看到**真正落库的值**。
+        # 否则 patch("contact", 0.0) 会写入 False，而级联拿到的是 0.0，
+        # `0.0 is False` 不成立，级联被静默跳过。
+        stored = new_value
         if field == "contact":
-            sv2.contact = bool(new_value)
+            stored = _tristate(new_value)
+            sv2.contact = stored
         elif field == "slip_event":
-            sv2.slip_event = bool(new_value)
+            stored = _tristate(new_value)
+            sv2.slip_event = stored
         elif field in ("force_magnitude", "object_deformation", "temperature", "confidence"):
             setattr(sv2, field, new_value)
         else:
@@ -150,7 +162,7 @@ class TLabelFrame:
 
         cascades = []
         if cascade:
-            cascades = self._apply_cascade(field, new_value)
+            cascades = self._apply_cascade(field, stored)
 
         patch_record["cascade"] = cascades
         self.patches.append(patch_record)
@@ -162,7 +174,9 @@ class TLabelFrame:
         cascades = []
 
         if field == "contact":
-            if not new_value:
+            # v0.26（D8）：只有明确的 False 才代表「接触结束」。
+            # None 是「不知道有没有接触」——此时清零力值等于凭空造数据。
+            if new_value is False:
                 # 接触结束 → 力度 / 形变不再有有效值
                 #
                 # P9/T0-4 修正：这里不再写 0.0。
@@ -176,12 +190,12 @@ class TLabelFrame:
                         cascades.append({
                             "field": zf, "old_value": old_val, "new_value": None,
                         })
-                # slip_event 目前是 bool 二态字段，无法表达"不适用"。
-                # 待 T0-5 三态化后改为置 None；在此之前保持 False。
-                if sv2.slip_event:
-                    sv2.slip_event = False
+                # v0.26（D8）：接触结束后滑移状态不再有意义，但也不能断言
+                # 「没滑」——置 None 表示不适用/未知，而不是填一个假的 False。
+                if sv2.slip_event is True:
+                    sv2.slip_event = None
                     cascades.append({
-                        "field": "slip_event", "old_value": True, "new_value": False,
+                        "field": "slip_event", "old_value": True, "new_value": None,
                     })
                 # force_vector 归零
                 if sv2.force_vector is not None:
@@ -684,8 +698,13 @@ class TLabelData:
 
     def to_dict(self) -> Dict:
         """转换为字典（Schema V2 格式）"""
-        contact_count = sum(1 for f in self.frames if f.contact > 0.5)
-        slip_count = sum(1 for f in self.frames if f.slip_event > 0.5)
+        # v0.26（D8）：contact / slip_event 可为 None，`None > 0.5` 会抛 TypeError。
+        # 只有明确的 True 才算接触帧；None 单独计数，不能混进「非接触」——
+        # 那会把「不知道」统计成「没有」，下游据此算出的接触率是错的。
+        contact_count = sum(1 for f in self.frames if f.contact is True)
+        slip_count = sum(1 for f in self.frames if f.slip_event is True)
+        contact_unknown = sum(1 for f in self.frames if f.contact is None)
+        slip_unknown = sum(1 for f in self.frames if f.slip_event is None)
 
         # v0.7: 加载特征元数据
         try:
@@ -713,8 +732,10 @@ class TLabelData:
                 "stats": {
                     "contact_frames": contact_count,
                     "contact_ratio": round(contact_count / max(self.num_frames, 1), 4),
+                    "contact_unknown_frames": contact_unknown,
                     "slip_frames": slip_count,
                     "slip_ratio": round(slip_count / max(self.num_frames, 1), 4),
+                    "slip_unknown_frames": slip_unknown,
                     "modified_frames": self.modified_count,
                 }
             },

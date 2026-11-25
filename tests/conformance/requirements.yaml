@@ -1,0 +1,1288 @@
+- id: TL-4.2-1
+  chapter: 4
+  chapter_name: 编码规则
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch04_structure.py::test_non_ucum_unit_in_sensor_specific_is_rejected
+  - tests/conformance/negative/test_ch04_structure.py::test_ucum_unit_in_sensor_specific_is_accepted
+  note: 附录 A 之外的 UCUM 码必须报错（含扩展容器自报单位）
+- id: TL-4.2-2
+  chapter: 4
+  chapter_name: 编码规则
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch04_structure.py::test_dataset_level_unit_table_is_rejected
+  - tests/conformance/negative/test_ch04_structure.py::test_plain_dataset_without_unit_table_is_accepted
+  note: 数据集级元数据覆盖单位必须报错
+- id: TL-4.2-3
+  chapter: 4
+  chapter_name: 编码规则
+  testable: none
+  kinds: []
+  tests: []
+  note: 跨单位相乘先转 SI 是计算过程，结果无法反推过程
+- id: TL-4.3-1
+  chapter: 4
+  chapter_name: 编码规则
+  testable: full
+  kinds:
+  - neg
+  - bnd
+  tests:
+  - tests/conformance/boundary/test_boundary.py::test_extreme_normal_force_is_not_a_crash
+  - tests/conformance/negative/test_ch04_structure.py::test_non_finite_does_not_produce_duplicate_findings
+  - tests/conformance/negative/test_ch04_structure.py::test_non_finite_scalar_is_rejected
+  - tests/conformance/negative/test_ch04_structure.py::test_non_finite_vector_component_is_rejected
+  note: NaN / Inf 必须被拒
+- id: TL-4.3-2
+  chapter: 4
+  chapter_name: 编码规则
+  testable: none
+  kinds: []
+  tests: []
+  note: 约束的是消费者不得假设小数位，不是数据形态
+- id: TL-4.4-1
+  chapter: 4
+  chapter_name: 编码规则
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch04_structure.py::test_missing_core_key_is_rejected
+  note: 8 个核心键缺任何一个都报错
+- id: TL-4.4-2
+  chapter: 4
+  chapter_name: 编码规则
+  testable: partial
+  kinds:
+  - neg
+  - rt
+  tests:
+  - tests/conformance/negative/test_ch04_structure.py::test_missing_key_differs_from_null_value
+  - tests/conformance/negative/test_ch04_structure.py::test_null_value_with_key_present_is_accepted
+  - tests/conformance/roundtrip/test_roundtrip.py::test_missing_key_and_null_stay_distinct_after_roundtrip
+  note: 缺键由 4.4-1 报（KEY_MISSING），null 由 7.3-2 报（NULL_WITHOUT_STATUS），没有独立的 4.4-2 finding。行为上两条路径确实分开了，但找不到一条「只属于
+    4.4-2」的断言。
+- id: TL-4.5-1
+  chapter: 4
+  chapter_name: 编码规则
+  testable: partial
+  kinds: []
+  tests: []
+  note: 与 TL-7.3-2 是同一条规则的两种表述；validator 只报 7.3-2，无独立 finding，故为 partial
+- id: TL-4.5-2
+  chapter: 4
+  chapter_name: 编码规则
+  testable: partial
+  kinds: []
+  tests: []
+  note: 意图不可验证；用 0/false/[] 冒充未测量时已被字段类型条款（如 5.1-1）拦下，无独立 finding
+- id: TL-4.5-3
+  chapter: 4
+  chapter_name: 编码规则
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch04_structure.py::test_capability_false_with_capability_claiming_state_is_rejected
+  - tests/conformance/negative/test_ch04_structure.py::test_capability_false_with_non_claiming_state_is_accepted
+  note: 显式状态与 capability 矛盾必须报错
+- id: TL-5.1-1
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_contact.py::test_contact_validator_rejects_non_tristate
+  note: contact 只接受 true/false/null
+- id: TL-5.1-2
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: none
+  kinds: []
+  tests: []
+  note: iff 真值条件依赖真实世界接触，无外部真值可比对
+- id: TL-5.1-3
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: partial
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_contact.py::test_contact_value_under_false_capability_is_rejected
+  note: 「能不能判断」是生产者自述；只能查 capability=false 时是否仍给了 false
+- id: TL-5.1-4
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_contact.py::test_human_annotated_contact_with_annotator_is_accepted
+  - tests/conformance/negative/test_ch05_contact.py::test_human_annotated_contact_without_annotator_is_rejected
+  - tests/conformance/negative/test_ch09_provenance.py::test_human_annotation_without_annotator_id_is_rejected
+  note: human_annotation 缺 annotator_id 必须报错
+- id: TL-5.1-5
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_contact.py::test_contact_string_value_is_rejected
+  - tests/conformance/negative/test_ch05_contact.py::test_contact_validator_rejects_non_tristate
+  note: 校验器必须拒绝非三态值（如 0.5）
+- id: TL-5.2-1
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_contact.py::test_centroid_with_one_component_is_rejected
+  - tests/conformance/negative/test_ch05_contact.py::test_centroid_with_three_components_is_rejected
+  note: 恰好 2 个元素；1 个或 3 个都要拒
+- id: TL-5.2-2
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: none
+  kinds: []
+  tests: []
+  note: 像素坐标无法从数值判别；数据集级单位约定由 TL-4.2-2 覆盖，本条无独立可验证形态
+- id: TL-5.2-3
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G5-N1]
+  - tests/conformance/negative/test_ch05_contact.py::test_centroid_referencing_3d_frame_is_rejected
+  note: 引用 dimension=3 的 frame 必须报错
+- id: TL-5.2-4
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_contact.py::test_contact_and_centroid_consistent_does_not_warn
+  - tests/conformance/negative/test_ch05_contact.py::test_contact_true_with_null_centroid_under_true_capability_is_rejected
+  - tests/conformance/negative/test_ch05_contact.py::test_contact_true_without_centroid_warns
+  - tests/conformance/negative/test_ch05_contact.py::test_no_contact_with_centroid_warns
+  - tests/conformance/negative/test_ch05_contact.py::test_null_contact_without_centroid_does_not_warn
+  note: SHOULD 级；contact 与 centroid 的有无不一致报 warning
+- id: TL-5.2-5
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_contact.py::test_centroid_method_outside_closed_set_is_rejected
+  - tests/conformance/negative/test_ch05_contact.py::test_centroid_without_method_is_rejected
+  note: 非 null centroid 缺 centroid_method 必须报错
+- id: TL-5.2-6
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_contact.py::test_geometric_centroid_without_weighting_quantity_is_accepted
+  - tests/conformance/negative/test_ch05_contact.py::test_pressure_weighted_centroid_without_weighting_quantity_is_rejected
+  note: pressure_weighted 未声明权重量必须报错
+- id: TL-5.2-7
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - pos
+  tests:
+  - tests/conformance/positive/test_ch05_legal_forms.py::test_pixel_centroid_as_null_with_unsupported_is_accepted
+  note: null + unsupported + 像素留在 sensor_specific 是合法形态
+- id: TL-5.3-1
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: partial
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_force.py::test_normal_force_negative_is_rejected
+  note: 能抓「等于模长且有切向分量」，抓不到「值对但推导路径错」
+- id: TL-5.3-2
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G1-N1]
+  - tests/conformance/negative/test_ch05_force.py::test_normal_force_equal_to_norm_along_normal_is_accepted
+  - tests/conformance/negative/test_ch05_force.py::test_normal_force_equal_to_norm_is_rejected
+  - tests/conformance/negative/test_ch05_force.py::test_normal_force_equal_to_norm_with_local_normal_is_rejected
+  note: normal_force == ‖F‖ 且有切向分量 → 报错
+- id: TL-5.3-3
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  - bnd
+  tests:
+  - tests/conformance/boundary/test_boundary.py::test_normal_force_inside_tolerance_is_accepted
+  - tests/conformance/boundary/test_boundary.py::test_normal_force_outside_tolerance_is_rejected
+  - tests/conformance/boundary/test_boundary.py::test_normal_force_tolerance_boundary_is_pinned
+  - tests/conformance/boundary/test_boundary.py::test_zero_force_vector_with_zero_normal_force_is_accepted
+  - tests/conformance/negative/test_ch05_force.py::test_derived_normal_force_without_normal_reference_is_rejected
+  - tests/conformance/negative/test_ch05_force.py::test_normal_force_not_matching_projection_is_rejected
+  note: 由 F 派生却没给 n 必须报错
+- id: TL-5.3-4
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  - bnd
+  - ximpl
+  tests:
+  - tests/conformance/boundary/test_boundary.py::test_unit_normal_exactly_at_float_boundary
+  - tests/conformance/boundary/test_boundary.py::test_unit_normal_inside_tolerance_is_accepted
+  - tests/conformance/boundary/test_boundary.py::test_unit_normal_outside_tolerance_is_rejected
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G1-N3]
+  - tests/conformance/negative/test_ch05_force.py::test_normal_vector_at_tolerance_boundary_is_rejected
+  - tests/conformance/negative/test_ch05_force.py::test_normal_vector_not_unit_is_rejected
+  - tests/conformance/negative/test_ch05_force.py::test_normal_vector_within_tolerance_is_accepted
+  note: '|‖n‖−1| 正好 1e-3 通过、超出拒绝'
+- id: TL-5.3-5
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_force.py::test_direct_normal_force_with_measurement_axis_is_accepted
+  - tests/conformance/negative/test_ch05_force.py::test_direct_normal_force_without_measurement_axis_is_rejected
+  note: direct_measurement 未声明测量轴必须报错
+- id: TL-5.3-6
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - pos
+  tests:
+  - tests/conformance/positive/test_ch05_legal_forms.py::test_normal_force_null_when_normal_undetermined_is_accepted
+  note: 无法确定法向却给了 normal_force 必须报错
+- id: TL-5.3-7
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - pos
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_force.py::test_normal_force_alone_without_force_vector_is_accepted
+  - tests/conformance/positive/test_ch05_legal_forms.py::test_normal_force_without_force_vector_is_accepted
+  note: 只有 normal_force、没有 force_vector 必须通过
+- id: TL-5.3-8
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_force.py::test_normal_reference_outside_closed_set_is_rejected
+  note: normal_reference 三值闭集之外必须报错
+- id: TL-5.3-9
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G1-N2]
+  - tests/conformance/negative/test_ch05_force.py::test_local_normal_without_vector_is_rejected
+  note: contact_interface_local 缺 n 必须报错
+- id: TL-5.3-10
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: partial
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_force.py::test_measurement_axis_with_angular_tolerance_is_accepted
+  - tests/conformance/negative/test_ch05_force.py::test_measurement_axis_without_angular_tolerance_is_rejected
+  note: 容差的**值**对不对是生产者的物理判断，校验器只查有没有声明；「轴向力冒充法向力」的实际角度差无法从数据反推
+- id: TL-5.3-11
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: partial
+  kinds: []
+  tests: []
+  note: 「多个局部法向」需要多接触区结构才能识别
+- id: TL-5.4-1
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  - bnd
+  tests:
+  - tests/conformance/boundary/test_boundary.py::test_empty_vector_is_rejected
+  - tests/conformance/negative/test_ch05_force.py::test_force_vector_with_string_component_is_rejected
+  - tests/conformance/negative/test_ch05_force.py::test_force_vector_with_two_components_is_rejected
+  note: 恰好 3 个有限数
+- id: TL-5.4-2
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_force.py::test_force_vector_referencing_2d_frame_is_rejected
+  note: 引用 dimension=2 的 frame 必须报错
+- id: TL-5.4-3
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: partial
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_force.py::test_force_vector_without_frame_is_rejected
+  note: 「底层坐标系未知」只能由未声明 frame 推断
+- id: TL-5.4-4
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: partial
+  kinds: []
+  tests: []
+  note: 方向约定只能查 provenance 是否记录了取反
+- id: TL-5.4-5
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: partial
+  kinds: []
+  tests: []
+  note: 同上：只能查 torque 是否也声明了同一约定
+- id: TL-5.5-1
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_force.py::test_torque_vector_with_two_components_is_rejected
+  note: 恰好 3 个有限数
+- id: TL-5.5-2
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_force.py::test_torque_vector_referencing_2d_frame_is_rejected
+  note: 引用 dimension=2 的 frame 必须报错
+- id: TL-5.5-3
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_force.py::test_torque_with_reference_point_is_accepted
+  - tests/conformance/negative/test_ch05_force.py::test_torque_without_reference_point_is_rejected
+  note: 非 null torque 缺 reference_point 必须报错
+- id: TL-5.5-4
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: none
+  kinds: []
+  tests: []
+  note: 参考点是否与实际计算一致，数据里没有第二份信息可比
+- id: TL-5.5-5
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: partial
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_force.py::test_reference_point_with_two_components_is_rejected
+  note: 只能查 reference_point 长度与 frame 一致性
+- id: TL-5.5-6
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: none
+  kinds: []
+  tests: []
+  note: mm→m 的换算是否做过，结果无法反推
+- id: TL-5.6-1
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_slip_event_as_direct_measurement_is_rejected
+  note: slip_event 声明 direct_measurement 必须报错
+- id: TL-5.6-2
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_slip_event_numeric_value_is_rejected
+  note: slip_event 只接受三态
+- id: TL-5.6-3
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: partial
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_slip_event_value_under_false_capability_is_rejected
+  note: 同 TL-5.1-3
+- id: TL-5.7-1
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_slip_velocity_with_three_components_is_rejected
+  note: 恰好 2 个有限数
+- id: TL-5.7-2
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G5-N3]
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_slip_velocity_referencing_3d_frame_is_rejected
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_slip_velocity_with_out_of_plane_axis_is_rejected
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_slip_velocity_with_tangent_plane_frame_is_accepted
+  note: 引用非切平面 frame 必须报错
+- id: TL-5.7-3
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: none
+  kinds: []
+  tests: []
+  note: 相对运动方向是物理语义，数据里无法验证
+- id: TL-5.7-4
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_slip_velocity_with_slip_is_accepted
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_slip_velocity_without_slip_is_warning_not_error
+  note: SHOULD 级；slip_event 非 true 却有 slip_velocity 报 warning
+- id: TL-5.8-1
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_temperature_infinity_is_rejected
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_temperature_nan_is_rejected
+  note: 非有限数必须报错
+- id: TL-5.8-2
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_temperature_measurement_target_outside_closed_set_is_rejected
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_temperature_with_valid_target_is_accepted
+  - tests/conformance/negative/test_ch05_slip_temp.py::test_temperature_without_measurement_target_is_rejected
+  note: 缺 measurement_target 或值不在闭集必须报错
+- id: TL-5.8-3
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: partial
+  kinds: []
+  tests: []
+  note: 「聚合了多目标」只能从单一值 + 多目标声明间接发现
+- id: TL-5.8-4
+  chapter: 5
+  chapter_name: 核心字段语义
+  testable: partial
+  kinds: []
+  tests: []
+  note: 要求分别报告，但无法证明某个值是平均值
+- id: TL-6.1-1
+  chapter: 6
+  chapter_name: 扩展字段
+  testable: none
+  kinds: []
+  tests: []
+  note: 约束的是解释方式，不是数据形态
+- id: TL-6.2-1
+  chapter: 6
+  chapter_name: 扩展字段
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch06_extensions.py::test_absent_contact_region_is_accepted
+  - tests/conformance/negative/test_ch06_extensions.py::test_all_seven_contact_regions_are_accepted
+  - tests/conformance/negative/test_ch06_extensions.py::test_contact_region_outside_closed_set_is_rejected
+  note: 七值闭集之外必须报错
+- id: TL-6.2-2
+  chapter: 6
+  chapter_name: 扩展字段
+  testable: none
+  kinds: []
+  tests: []
+  note: 约束的是消费者不得当互斥分类用
+- id: TL-6.2-3
+  chapter: 6
+  chapter_name: 扩展字段
+  testable: none
+  kinds: []
+  tests: []
+  note: 同上，跨设备比较的行为约束
+- id: TL-6.3-1
+  chapter: 6
+  chapter_name: 扩展字段
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch06_extensions.py::test_all_six_texture_classes_are_accepted
+  - tests/conformance/negative/test_ch06_extensions.py::test_texture_class_outside_closed_set_is_rejected
+  note: 六值闭集之外必须报错
+- id: TL-6.3-2
+  chapter: 6
+  chapter_name: 扩展字段
+  testable: none
+  kinds: []
+  tests: []
+  note: 约束的是解释方式
+- id: TL-6.3-3
+  chapter: 6
+  chapter_name: 扩展字段
+  testable: partial
+  kinds: []
+  tests: []
+  note: 无映射地从粗糙度参数派生，只能查 provenance 是否声明了映射
+- id: TL-6.4-1
+  chapter: 6
+  chapter_name: 扩展字段
+  testable: none
+  kinds: []
+  tests: []
+  note: 规范未定义「形变对象已识别」在数据中的声明位置，无法判定一个 object_deformation 值是否合规
+- id: TL-6.4-2
+  chapter: 6
+  chapter_name: 扩展字段
+  testable: full
+  kinds:
+  - pos
+  tests:
+  - tests/conformance/positive/test_ch05_legal_forms.py::test_elastomer_deformation_in_sensor_specific_is_accepted
+  note: 弹性体形变记在 sensor_specific 是合法形态
+- id: TL-6.5-1
+  chapter: 6
+  chapter_name: 扩展字段
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch06_extensions.py::test_deprecated_field_in_native_data_is_rejected
+  - tests/conformance/negative/test_ch06_extensions.py::test_deprecated_field_with_null_is_accepted
+  note: native V3.0 数据出现 deprecated 非 null 必须报错
+- id: TL-6.5-2
+  chapter: 6
+  chapter_name: 扩展字段
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch06_extensions.py::test_deprecated_field_in_migrated_data_is_only_a_warning
+  - tests/conformance/negative/test_ch06_extensions.py::test_deprecated_field_in_native_data_is_not_a_warning
+  note: 原生数据 error、迁移数据 warning，按数据来源分级
+- id: TL-7.1-1
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch07_capability.py::test_complete_capability_table_is_accepted
+  - tests/conformance/negative/test_ch07_capability.py::test_missing_capability_declaration_is_rejected
+  note: 缺 capability 声明必须报错
+- id: TL-7.1-2
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: partial
+  kinds: []
+  tests: []
+  note: 「覆盖了能力不同的通道」需要多通道结构才可判
+- id: TL-7.1-3
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: none
+  kinds: []
+  tests: []
+  note: true 的语义定义，不是可判定条件
+- id: TL-7.2-1
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: partial
+  kinds: []
+  tests: []
+  note: 「生产者不得产出迁移态」是产出侧义务；校验器报的是 TL-7.2-3（MIGRATION_STATE_IN_NATIVE），没有独立的 7.2-1
+    finding
+- id: TL-7.2-2
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch07_capability.py::test_migration_state_with_audit_is_not_reported_as_7_2_2
+  - tests/conformance/negative/test_ch07_capability.py::test_migration_state_without_audit_is_rejected
+  note: 含 unknown_for_migration 但无迁移审计必须报错
+- id: TL-7.2-3
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G6-N2]
+  - tests/conformance/negative/test_ch07_capability.py::test_migration_state_in_native_data_is_rejected
+  note: 同上，校验器必须报 error 而非 warning
+- id: TL-7.2-4
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch07_capability.py::test_extension_states_are_recognized
+  note: not_annotated / not_applicable 不得被判成未知枚举
+- id: TL-7.2-5
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G4-N2]
+  - tests/conformance/negative/test_ch07_capability.py::test_state_with_non_null_value_is_rejected
+  - tests/conformance/negative/test_ch07_capability.py::test_state_with_null_value_is_accepted
+  note: 非 null 值配 not_annotated 必须报错
+- id: TL-7.3-1
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G3-N1]
+  - tests/conformance/negative/test_ch07_capability.py::test_value_without_capability_is_rejected
+  note: capability=false 却给了值必须报错
+- id: TL-7.3-2
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G4-N1]
+  - tests/conformance/negative/test_ch07_capability.py::test_capability_with_null_and_no_status_is_rejected
+  note: null + capability=true 缺状态必须报错
+- id: TL-7.3-3
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: full
+  kinds:
+  - pos
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch07_capability.py::test_capability_false_with_null_and_no_status_is_accepted
+  - tests/conformance/positive/test_ch05_legal_forms.py::test_null_without_status_under_false_capability_is_accepted
+  note: null + capability=false 省略状态必须通过
+- id: TL-7.3-4
+  chapter: 7
+  chapter_name: 能力与可用性
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch04_structure.py::test_capability_true_with_unsupported_is_rejected
+  - tests/conformance/negative/test_ch07_capability.py::test_capability_false_with_unsupported_is_accepted
+  - tests/conformance/negative/test_ch07_capability.py::test_capability_true_with_unsupported_is_rejected
+  note: null + capability=true 配 unsupported 必须报错
+- id: TL-8.1-1
+  chapter: 8
+  chapter_name: 坐标系
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G5-N2]
+  - tests/conformance/negative/test_ch08_frames.py::test_vector_referencing_undeclared_frame_is_rejected
+  note: 向量字段引用未声明的 frame 必须报错
+- id: TL-8.1-2
+  chapter: 8
+  chapter_name: 坐标系
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch08_frames.py::test_complete_frame_declaration_is_accepted
+  - tests/conformance/negative/test_ch08_frames.py::test_frame_missing_required_key_is_rejected
+  note: frame 声明缺 6 项任一必须报错
+- id: TL-8.1-3
+  chapter: 8
+  chapter_name: 坐标系
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch08_frames.py::test_frame_axes_do_not_match_dimension
+  - tests/conformance/negative/test_ch08_frames.py::test_frame_with_invalid_dimension_is_rejected
+  note: dimension=2 却声明 z 轴必须报错
+- id: TL-8.1-4
+  chapter: 8
+  chapter_name: 坐标系
+  testable: none
+  kinds: []
+  tests: []
+  note: MAY 条款，无可判定条件
+- id: TL-8.2-1
+  chapter: 8
+  chapter_name: 坐标系
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch08_frames.py::test_all_four_frame_types_are_accepted
+  - tests/conformance/negative/test_ch08_frames.py::test_frame_type_outside_closed_set_is_rejected
+  note: frame_type 四值闭集之外必须报错
+- id: TL-8.2-2
+  chapter: 8
+  chapter_name: 坐标系
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch08_frames.py::test_non_right_handedness_is_rejected
+  note: handedness 非 right 必须报错
+- id: TL-8.2-3
+  chapter: 8
+  chapter_name: 坐标系
+  testable: none
+  kinds: []
+  tests: []
+  note: 2D 右手性的解释约定，不是数据形态约束
+- id: TL-8.3-1
+  chapter: 8
+  chapter_name: 坐标系
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch08_frames.py::test_axis_without_declared_meaning_is_rejected
+  note: 轴未声明含义必须报错
+- id: TL-8.3-2
+  chapter: 8
+  chapter_name: 坐标系
+  testable: partial
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch08_frames.py::test_nominal_normal_axis_is_accepted
+  - tests/conformance/negative/test_ch08_frames.py::test_nominal_normal_used_as_local_contact_normal_is_rejected
+  note: nominal_surface_normal 被当每点法向，需结合 normal_reference 才可判
+- id: TL-8.3-3
+  chapter: 8
+  chapter_name: 坐标系
+  testable: partial
+  kinds: []
+  tests: []
+  note: 「假设 z 是法向」表现为 normal_reference 与轴声明矛盾
+- id: TL-8.4-1
+  chapter: 8
+  chapter_name: 坐标系
+  testable: none
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch08_frames.py::test_absent_transforms_is_accepted
+  note: MAY 条款 + 明确不做引擎
+- id: TL-8.4-2
+  chapter: 8
+  chapter_name: 坐标系
+  testable: none
+  kinds: []
+  tests: []
+  note: 约束消费者行为，不是数据形态
+- id: TL-8.4-3
+  chapter: 8
+  chapter_name: 坐标系
+  testable: none
+  kinds: []
+  tests: []
+  note: 变换算法是否正确，数据里无法验证
+- id: TL-8.4-4
+  chapter: 8
+  chapter_name: 坐标系
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch08_frames.py::test_complete_transform_is_accepted
+  - tests/conformance/negative/test_ch08_frames.py::test_transform_missing_required_key_is_rejected
+  - tests/conformance/negative/test_ch08_frames.py::test_transform_referencing_undeclared_frame_is_rejected
+  - tests/conformance/negative/test_ch08_frames.py::test_transform_with_bad_translation_unit_is_rejected
+  - tests/conformance/negative/test_ch08_frames.py::test_transform_with_unknown_rotation_representation_is_rejected
+  note: transform 缺 6 项任一必须报错
+- id: TL-8.4-5
+  chapter: 8
+  chapter_name: 坐标系
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch08_frames.py::test_transform_without_direction_is_rejected
+  note: 无方向的 transform 必须被拒
+- id: TL-9.2-1
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G2-N2]
+  - tests/conformance/negative/test_ch09_provenance.py::test_non_null_value_without_provenance_is_rejected
+  - tests/conformance/negative/test_ch09_provenance.py::test_null_value_without_provenance_is_accepted
+  note: 非 null 核心值缺 provenance type 必须报错
+- id: TL-9.2-2
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: partial
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch09_provenance.py::test_device_level_provenance_does_not_substitute_value_level
+  note: 「用设备级推断值级」表现为值级条目缺失但设备级存在
+- id: TL-9.3-1
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G2-N3]
+  - tests/conformance/negative/test_ch09_provenance.py::test_forbidden_provenance_type_is_rejected
+  note: provenance type 为 proxy 必须报错
+- id: TL-9.3-2
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G2-N1]
+  - tests/conformance/negative/test_ch09_provenance.py::test_provenance_type_without_required_info_is_rejected
+  note: 各类来源缺必填项必须报错
+- id: TL-9.3-3
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: none
+  kinds: []
+  tests: []
+  note: direct_measurement 的语义界定，不是可判定条件
+- id: TL-9.3-4
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch09_provenance.py::test_derived_measurement_without_method_id_is_rejected
+  note: derived 缺 method_id 必须报错
+- id: TL-9.4-1
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch09_provenance.py::test_centroid_without_method_is_rejected
+  - tests/conformance/negative/test_ch09_provenance.py::test_direct_normal_force_without_measurement_axis_is_rejected
+  - tests/conformance/negative/test_ch09_provenance.py::test_pressure_weighted_centroid_without_weighting_source_is_rejected
+  - tests/conformance/negative/test_ch09_provenance.py::test_temperature_without_measurement_target_is_rejected
+  note: 对应字段非 null 时缺上下文必须报错
+- id: TL-9.4-2
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: partial
+  kinds: []
+  tests: []
+  note: 「缺上下文必须拒」由各字段自己的上下文条款落地（5.2-5 / 5.3-8 / 5.5-3 / 5.8-2），没有独立的 9.4-2 finding；这一条是它们的汇总表述
+- id: TL-9.5-1
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: none
+  kinds: []
+  tests: []
+  note: 「是否对应核心字段」需要语义判断，无机器判据
+- id: TL-9.5-2
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch09_provenance.py::test_fully_structured_sensor_specific_entry_is_accepted
+  - tests/conformance/negative/test_ch09_provenance.py::test_structured_sensor_specific_entry_missing_key_is_rejected
+  note: 结构化条目缺 5 项任一必须报错
+- id: TL-9.5-3
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: partial
+  kinds:
+  - pos
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch09_provenance.py::test_unstructured_sensor_specific_entry_fails_extended
+  - tests/conformance/positive/test_ch05_legal_forms.py::test_bare_value_in_sensor_specific_is_accepted_at_core_level
+  - tests/conformance/positive/test_ch05_legal_forms.py::test_bare_value_in_sensor_specific_is_rejected_at_extended_level
+  note: V2 兼容允许非结构化；只有 Extended 才要求
+- id: TL-9.5-4
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: partial
+  kinds: []
+  tests: []
+  note: 「派生量混进 raw」只能靠已知派生特征名识别
+- id: TL-9.5-5
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: partial
+  kinds: []
+  tests: []
+  note: 「能表达为核心字段却放进扩展」需语义判断
+- id: TL-9.5-6
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: none
+  kinds: []
+  tests: []
+  note: 「物理意义未知」在数据里没有可判标记——唯一线索是 definition 的措辞，机器判断不了「这个值的物理意义是否已知」。除非将来引入显式的 semantics_defined
+    布尔，否则这条只能靠人审。
+- id: TL-9.6-1
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - pos
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G7-N1]
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G7-N2]
+  - tests/conformance/negative/test_ch09_time_instances.py::test_frame_without_instance_id_in_multi_instance_dataset_is_rejected
+  - tests/conformance/negative/test_ch09_time_instances.py::test_instance_id_in_declared_single_instance_is_accepted
+  - tests/conformance/negative/test_ch09_time_instances.py::test_instance_id_in_single_sensor_dataset_is_rejected
+  - tests/conformance/negative/test_ch09_time_instances.py::test_instance_id_not_declared_is_rejected
+  - tests/conformance/positive/test_ch05_legal_forms.py::test_multi_instance_declared_and_tagged_is_accepted
+  note: 多实例未声明 instances 或缺 instance_id 必须报错
+- id: TL-9.6-2
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - pos
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch09_provenance.py::test_single_sensor_dataset_may_omit_instances
+  - tests/conformance/positive/test_ch05_legal_forms.py::test_single_sensor_may_omit_instances
+  note: 单传感器省略 instances 必须通过
+- id: TL-9.6-3
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: partial
+  kinds: []
+  tests: []
+  note: '`instances[].capabilities` 已在规范中定义，但校验器尚未按实例解析能力；当前多实例能力差异场景在真实数据里还没出现，属于「规范已定义、实现未做」而非不可测'
+- id: TL-9.6-4
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: partial
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G7-N4]
+  - tests/conformance/negative/test_ch09_time_instances.py::test_time_base_inherited_from_dataset_is_allowed
+  - tests/conformance/negative/test_ch09_time_instances.py::test_time_base_override_without_declaration_is_rejected
+  note: override 是否声明，只能查 instance 里有没有该键
+- id: TL-9.7-1
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch09_provenance.py::test_non_finite_timestamp_is_rejected
+  - tests/conformance/negative/test_ch09_provenance.py::test_non_numeric_timestamp_is_rejected
+  note: timestamp_s 非有限数必须报错
+- id: TL-9.7-2
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - neg
+  - bnd
+  tests:
+  - tests/conformance/boundary/test_boundary.py::test_negative_timestamp_is_allowed
+  - tests/conformance/negative/test_ch09_provenance.py::test_all_four_time_bases_are_accepted
+  - tests/conformance/negative/test_ch09_provenance.py::test_missing_time_base_is_rejected
+  note: time_base 四值之外必须报错
+- id: TL-9.7-3
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - pos
+  - neg
+  - bnd
+  tests:
+  - tests/conformance/boundary/test_boundary.py::test_equal_consecutive_timestamps_are_allowed
+  - tests/conformance/negative/test_ch09_provenance.py::test_decreasing_timestamp_is_rejected
+  - tests/conformance/negative/test_ch09_provenance.py::test_equal_consecutive_timestamps_are_accepted
+  - tests/conformance/negative/test_ch09_time_instances.py::test_timestamp_decrease_within_one_instance_is_rejected
+  - tests/conformance/positive/test_ch05_legal_forms.py::test_instance_time_axis_is_independent
+  note: 相等允许、递减报错；单帧与两帧都测
+- id: TL-9.7-4
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - neg
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G7-N3]
+  - tests/conformance/negative/test_ch09_time_instances.py::test_time_base_change_across_instances_is_allowed
+  - tests/conformance/negative/test_ch09_time_instances.py::test_time_base_change_between_frames_is_rejected
+  - tests/conformance/negative/test_ch09_time_instances.py::test_time_base_inherited_from_dataset_is_not_a_change
+  note: 同一实例帧间 time_base 变化必须报错
+- id: TL-9.7-5
+  chapter: 9
+  chapter_name: provenance 与上下文
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch09_provenance.py::test_device_clock_with_clock_identity_is_accepted
+  - tests/conformance/negative/test_ch09_provenance.py::test_device_clock_without_clock_identity_is_rejected
+  note: device_clock 缺时钟身份必须报错
+- id: TL-10.1-1
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: none
+  kinds:
+  - rt
+  tests:
+  - tests/conformance/roundtrip/test_roundtrip.py::test_empty_containers_are_distinguishable_from_missing
+  - tests/conformance/roundtrip/test_roundtrip.py::test_falsy_values_survive_roundtrip
+  - tests/conformance/roundtrip/test_roundtrip.py::test_float_precision_is_preserved
+  - tests/conformance/roundtrip/test_roundtrip.py::test_invalid_frame_keeps_same_findings_after_roundtrip
+  - tests/conformance/roundtrip/test_roundtrip.py::test_legal_frame_survives_roundtrip
+  - tests/conformance/roundtrip/test_roundtrip.py::test_missing_key_and_null_stay_distinct_after_roundtrip
+  - tests/conformance/roundtrip/test_roundtrip.py::test_non_ascii_method_id_survives_roundtrip
+  - tests/conformance/roundtrip/test_roundtrip.py::test_scientific_notation_roundtrips
+  - tests/conformance/roundtrip/test_roundtrip.py::test_whole_dataset_roundtrip_keeps_cross_frame_state
+  note: 规范性声明，不是数据约束
+- id: TL-10.1-2
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: none
+  kinds: []
+  tests: []
+  note: MAY 条款
+- id: TL-10.1-3
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch10_validator.py::test_correct_field_names_are_accepted
+  - tests/conformance/negative/test_ch10_validator.py::test_dataset_level_key_case_variant_is_rejected
+  - tests/conformance/negative/test_ch10_validator.py::test_field_name_case_variant_is_rejected
+  - tests/conformance/negative/test_ch10_validator.py::test_instances_key_case_variant_is_rejected
+  - tests/conformance/negative/test_ch10_validator.py::test_unknown_key_in_sensor_specific_is_not_rejected
+  note: 字段名大小写变体必须报错
+- id: TL-10.2-1
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch10_validator.py::test_report_carries_conformance_level
+  note: 报告必须含 level 字段
+- id: TL-10.2-2
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: none
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch10_validator.py::test_structural_level_is_distinguishable_from_core
+  note: 命名与表述约束，不是数据约束
+- id: TL-10.2-3
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: partial
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch10_validator.py::test_core_report_only_skips_extended_checks
+  - tests/conformance/negative/test_ch10_validator.py::test_structural_report_lists_what_it_did_not_check
+  note: 只能查报告里是否有「未执行的检查」字段
+- id: TL-10.3-1
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch10_validator.py::test_coordinate_semantics_are_checked_not_just_types
+  note: 坐标语义检查必须真的报错（用 C-1 用例反证）
+- id: TL-10.4-1
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch10_validator.py::test_every_finding_cites_a_clause
+  note: 每条 finding 必须带 clause
+- id: TL-10.4-2
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch10_validator.py::test_three_outcomes_are_distinguished
+  note: 三种结果（pass/error/not_verified）都要能出现
+- id: TL-10.4-3
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: partial
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch10_validator.py::test_not_verified_is_neither_error_nor_pass
+  note: 只能查 not_verified 没有被归入 error 或 pass
+- id: TL-10.5-1
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch10_validator.py::test_all_reported_codes_are_defined_in_spec
+  - tests/conformance/negative/test_ch10_validator.py::test_code_table_has_no_duplicates
+  - tests/conformance/negative/test_ch10_validator.py::test_every_defined_code_has_a_layer
+  note: 未定义错误码必须被识别（X_ 前缀除外）
+- id: TL-10.5-2
+  chapter: 10
+  chapter_name: 校验器行为
+  testable: full
+  kinds:
+  - neg
+  tests:
+  - tests/conformance/negative/test_ch10_validator.py::test_finding_carries_all_required_fields
+  note: 每条 finding 必须有 code/clause/field/value
+- id: TL-11.1-1
+  chapter: 11
+  chapter_name: 版本与迁移
+  testable: none
+  kinds:
+  - mig
+  tests:
+  - tests/conformance/migration/test_ch11_migration.py::test_breaking_change_requires_null_not_guess
+  - tests/conformance/migration/test_ch11_migration.py::test_semantically_different_field_is_not_migrated_directly
+  note: Breaking 的定义，是判断依据不是数据约束
+- id: TL-11.2-1
+  chapter: 11
+  chapter_name: 版本与迁移
+  testable: none
+  kinds:
+  - mig
+  tests:
+  - tests/conformance/migration/test_ch11_migration.py::test_deprecated_field_remains_readable
+  - tests/conformance/migration/test_ch11_migration.py::test_deprecated_fields_are_not_removed_from_schema
+  note: 跨 MAJOR 版本的兼容承诺，需多版本数据才可测
+- id: TL-11.3-1
+  chapter: 11
+  chapter_name: 版本与迁移
+  testable: full
+  kinds:
+  - mig
+  - ximpl
+  tests:
+  - tests/conformance/cross_impl/test_cross_impl.py::test_vector_matches_reference_implementation[G6-N1]
+  - tests/conformance/migration/test_ch11_migration.py::test_migration_does_not_infer_missing_context
+  - tests/conformance/migration/test_ch11_migration.py::test_migration_provenance_is_external_not_measured
+  note: 迁移不得凭空产生源数据里没有的值
+- id: TL-11.3-2
+  chapter: 11
+  chapter_name: 版本与迁移
+  testable: full
+  kinds:
+  - mig
+  tests:
+  - tests/conformance/migration/test_ch11_migration.py::test_migration_does_not_discard_relocatable_value
+  note: 可迁移的源值不得丢弃
+- id: TL-11.3-3
+  chapter: 11
+  chapter_name: 版本与迁移
+  testable: full
+  kinds:
+  - mig
+  tests:
+  - tests/conformance/migration/test_ch11_migration.py::test_migration_audit_covers_every_degraded_field
+  - tests/conformance/migration/test_ch11_migration.py::test_migration_audit_records_six_items
+  note: 迁移报告必须记录 6 项
+- id: TL-11.3-4
+  chapter: 11
+  chapter_name: 版本与迁移
+  testable: full
+  kinds:
+  - mig
+  tests:
+  - tests/conformance/migration/test_ch11_migration.py::test_unmigratable_value_becomes_null_with_status
+  note: 无法迁移必须 null + unknown_for_migration

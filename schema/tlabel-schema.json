@@ -94,7 +94,7 @@
         },
         "torque_vector": {
           "type": "boolean",
-          "description": "3D torque vector [Mx, My, Mz] (N\u00b7m) capability"
+          "description": "3D torque vector [Mx, My, Mz] (N·m) capability"
         },
         "slip_event": {
           "type": "boolean",
@@ -200,7 +200,164 @@
             "type": "number"
           },
           "schema_v2": {
-            "type": "object"
+            "type": "object",
+            "description": "Schema V2.1 的 14 维结构化标注。缺失一律用 null，不用 0 / false 代替——0 和 false 是确定的观测结果，null 是「没有这个值」。",
+            "properties": {
+              "contact": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "接触状态（三态）。true=确定接触，false=确定未接触，null=该帧或该数据集无法给出判断。不得用 false 表示「没测」（V3.0 TL-5.6-3 同理）。"
+              },
+              "contact_centroid": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "接触中心 [x, y]（mm）。contact=true 时必填。"
+              },
+              "contact_region": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "palmar",
+                  "digital",
+                  "lateral",
+                  "proximal",
+                  "distal",
+                  "dorsal",
+                  "other",
+                  null
+                ],
+                "description": "粗粒度接触区域。人形手专用词表，非人形传感器置 null。"
+              },
+              "force_magnitude": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "力的大小（N）。V2 未区分法向力与合力模长——V3.0 已改名为 normal_force 并收紧为 |F·n|，迁移时不推断。"
+              },
+              "force_vector": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3,
+                "description": "力矢量 [Fx, Fy, Fz]（N）。坐标系未在 V2 中声明。"
+              },
+              "torque_vector": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3,
+                "description": "力矩矢量（N·m）。参考点未在 V2 中声明。"
+              },
+              "slip_event": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "滑移状态（三态）。true=确定发生滑移，false=确定未滑移，null=无法判断。不得用 false 表示「未测量」。"
+              },
+              "slip_velocity": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "滑移速度 [vx, vy]（mm/s）。"
+              },
+              "manipulation_phase": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "pre_contact",
+                  "approach",
+                  "grasp",
+                  "lift",
+                  "hold",
+                  "place",
+                  null
+                ],
+                "description": "操作阶段。"
+              },
+              "texture_class": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "smooth",
+                  "rough",
+                  "granular",
+                  "fibrous",
+                  "sticky",
+                  "slippery",
+                  null
+                ],
+                "description": "纹理类别。"
+              },
+              "object_deformation": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "物体形变量（mm）。注意：传感器弹性体的形变不是物体形变，图像强度 RMS 也不是毫米——那类值应进 sensor_specific。"
+              },
+              "temperature": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "温度（°C）。"
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "本帧标注置信度。"
+              },
+              "compliance_level": {
+                "type": "string",
+                "enum": [
+                  "L1",
+                  "L2",
+                  "L3",
+                  "L4"
+                ],
+                "description": "合规等级。"
+              }
+            },
+            "required": [
+              "confidence",
+              "compliance_level"
+            ]
           },
           "manipulation_phase": {
             "type": [

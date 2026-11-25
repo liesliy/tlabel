@@ -165,7 +165,9 @@ def test_cascade_contact_zero():
     frame.patch("contact", 0.0, cascade=True)
 
     assert frame.schema_v2.force_magnitude is None
-    assert frame.schema_v2.slip_event is False
+    # v0.26（D8）：接触结束后滑移不再有意义，但也不能断言「没滑」。
+    # 规范 TL-5.6-3 要求无法确定滑移时必须为 null，不得用 false 表示「未测量」。
+    assert frame.schema_v2.slip_event is None
     assert frame.schema_v2.object_deformation is None
     assert frame.manipulation_phase == "idle"
     assert len(frame.patches) == 1

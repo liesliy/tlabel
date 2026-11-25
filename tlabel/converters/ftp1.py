@@ -380,12 +380,16 @@ def tlabel_to_ftp1(
         feature_matrix = []
         for frame in data.frames:
             sv2 = frame.schema_v2
+            # v0.26（D8）：contact / slip_event 是三态。FTP1 的矩阵是纯浮点，
+            # 装不下 null，因此未知用 NaN 表示 —— 下游能识别为缺失。
+            # 填 0.0 等于把「不知道」导出成一次「确定没有接触」的观测。
+            _nan = float("nan")
             row = [
-                1.0 if sv2.contact else 0.0,
+                _nan if sv2.contact is None else (1.0 if sv2.contact else 0.0),
                 sv2.contact_centroid[0] if sv2.contact_centroid else 0.0,
                 sv2.contact_centroid[1] if sv2.contact_centroid else 0.0,
                 sv2.force_magnitude if sv2.force_magnitude is not None else 0.0,
-                1.0 if sv2.slip_event else 0.0,
+                _nan if sv2.slip_event is None else (1.0 if sv2.slip_event else 0.0),
                 sv2.object_deformation if sv2.object_deformation is not None else 0.0,
                 sv2.confidence,
             ]

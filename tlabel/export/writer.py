@@ -36,9 +36,12 @@ def _flatten_schema_v2(schema: TLabelSchemaV2) -> dict:
     向量字段展开为多列：contact_centroid → centroid_x, centroid_y 等。
     """
     flat = {
-        "contact": float(schema.contact),
+        # v0.26（D8）：contact / slip_event 是三态。导出时 None 必须保持为空，
+        # 不能像以前那样 float(None) 崩、也不能填 0.0 —— 0.0 会被下游读成
+        # 「确定没有接触」，那是把「不知道」伪造成一次观测。
+        "contact": None if schema.contact is None else float(schema.contact),
         "force_magnitude": schema.force_magnitude if schema.force_magnitude is not None else 0.0,
-        "slip_event": float(schema.slip_event),
+        "slip_event": None if schema.slip_event is None else float(schema.slip_event),
         "confidence": schema.confidence,
         "compliance_level": schema.compliance_level,
     }

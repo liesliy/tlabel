@@ -45,11 +45,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   力——放着真力数据不用。现在有 `force_vector_N` 时 `force_magnitude` 取力向量
   模长（真实牛顿值）并报 L3，无标定时才为 `None`。
 
-  `object_deformation` 在物理量**种类**正确时保留（形变程度），即使单位不是
-  毫米；单位规范化推迟到 Schema V3.0。
+- **`contact` / `slip_event` 改为三态 `bool | None`**：此前是 `bool`，默认
+  `False`。`None` 表示"该帧或该数据集无法给出这个判断"，与 `False`（"确定没有"）
+  是两件事。
+
+  此前 `False` 同时承担两种含义，产生三个互相矛盾的行为：`tashan_ts_f_a` 适配器
+  已经在对无滑移判据的数据填 `slip_event=None`，但 `validate()` 判它非法、
+  `to_dict()` 照常输出 `null`、`from_dict()` 的 `bool(None)` 又读回 `False`——
+  写进去是"不知道"，读出来是"确定没滑"。
+
+  受影响的出口全部改为显式区分：
+
+  | 出口 | `None` 的表示 |
+  |---|---|
+  | JSON | `null` |
+  | CSV | 空字段（读回还原为 `None`；`"0"` / `"false"` 才是 `False`） |
+  | HDF5 | 原生可存 |
+  | FTP1 矩阵 | `NaN`（纯浮点矩阵装不下 `null`） |
+  | 统计 | 单独计 `contact_unknown_frames` / `slip_unknown_frames` |
+
+  未知帧不并入"非接触"一侧：接触率的分母仍是全部帧，但未知量单列，下游能区分
+  "接触很少"和"大量帧根本不知道有没有接触"。
+
+- **五个视觉触觉适配器的 `object_deformation` 恒为 `None`**：`gelsight` /
+  `vtouch` / `daimon_dataset` / `daimon_dm_tac` / `ycb_slide` 此前把**图像强度
+  RMS**（无量纲）填进这个单位是 mm 的字段。相机看到的是传感器弹性体的亮度变化，
+  不是物体被压下去多少毫米。
+
+  规范依据 TL-6.4-1 / TL-6.4-2：未识别形变对象时不得报告 `object_deformation`，
+  弹性体形变必须作为派生特征记在 `sensor_specific`。原值移到
+  `sensor_specific.deformation_image_rms`，带 `unit: "1"`、`method_id`、
+  `namespace: "image_intensity"`——数据不丢，但不再冒充长度。
+
+  对应能力声明 `capabilities["object_deformation"]` 改为 `False`。
+
+  同一处修正也进入迁移路径：`tlabel/v3/migrate.py` 不再把 V2 的
+  `object_deformation` 当毫米直接搬运，改为记 `unknown_for_migration` 并把原值
+  留在 `sensor_specific.legacy_object_deformation`。
+
+  `gelsight` 的 `force_magnitude` **不受影响**：该数据集本身带标定力向量，
+  取模长是真实牛顿值，属于合规的真力数据。
 
 ### Added
 
+- **`tlabel/v3/` —— Schema V3.0 参考实现**：`schema.py`（数据类与序列化）、
+  `validator.py`（规则校验，输出带 `clause` 的 finding）、`migrate.py`
+  （V2 → V3 迁移）。V3 与 V2 并存，互不破坏。
+
+  迁移工具遵守两条铁律：**不能推断**（V2 没有的信息不能凭空出现）、
+  **不能丢失**（旧值必须留在可追溯位置）。语义不明的字段一律记
+  `unknown_for_migration` 并附审计条目，宁可拒绝也不产出"看起来成功、实际
+  全 null"的数据集。
 - **`TLabelSchemaV2.validate(capabilities=...)`**：可选的能力↔帧值交叉校验通道。
   声明为 `False` 的维度，对应字段必须是 `None`；填 `0.0` / `False` 会报错。
   这是打通"能力声明"与"实际帧值"的第一条校验，此前两者可以完全脱节。
@@ -66,6 +112,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `deformation_magnitude`。
 - `gelsight` 的 `deformation_magnitude_peak` 当前值等于 `deformation_magnitude`
   （RMS），并非真峰值；改值会影响既有 classifier 一致性，暂只标记待清理。
+- `predict/engine.py` 的 `fit()` 配对错位：此前先过滤出非缺失值再 `zip(frames)`，
+  中间只要有一帧缺失，后面的 `(值, 帧)` 配对全部错位，算出的
+  `contact_mean` / `no_contact_mean` 是错的。改为先保留配对再过滤。
+- `quality/scorer.py` 把未知接触当成"确定没接触"：`1.0 if contact else 0.0`
+  把 `None` 压成 `0.0`，一致性规则于是对着一个假前提判违规，把"不知道"报成
+  "数据自相矛盾"。改为未知帧整帧跳过，滑移未知时不参与 Rule 2/3。
+- `core/annotation.py` 把未知接触误判成事件：`not None` 为 `True`，
+  "未知 → `True`"被当成一次 `contact_onset`，"`True` → 未知"被当成一次
+  `contact_loss`，凭空生成标注。改为两端都确定才判。
+- CSV 往返把未知读成 `False`：导出未知写成空字段，读回是空串，
+  `bool("")` 得到 `False`——同一个坑换了个入口。`_tristate()` 加字符串分支：
+  空串还原 `None`，`"0"` / `"0.0"` / `"false"` 得 `False`（`bool("0") == True`
+  是反向错误），无法解释的字面量抛 `ValueError`。
 
 ## [0.25.0] - 2026-11-12
 

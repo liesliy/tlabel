@@ -190,13 +190,13 @@ The 14 dimensions, in normative order, are:
 
 | # | Field name | Type | Unit | Requiredness | Level gate | Example |
 |---|---|---|---|---|---|---|
-| 1 | `contact` | boolean | — | REQUIRED (unconditional) | L1+ | `true` |
+| 1 | `contact` | boolean \| null | — | REQUIRED key; value MAY be `null` | L1+ | `true` |
 | 2 | `contact_centroid` | `[number, number]` | sensor pixels or mm (sensor-local) | REQUIRED when `contact == true` | L1+ | `[310.0, 245.0]` |
 | 3 | `contact_region` | string enum | — | OPTIONAL | — | `"palmar"` |
 | 4 | `force_magnitude` | number (≥ 0) | N (newton) | REQUIRED when level ≥ L2 | L2+ | `1.2` |
 | 5 | `force_vector` | `[number, number, number]` | N | REQUIRED when level ≥ L3 | L3+ | `[0.12, -0.30, 2.50]` |
 | 6 | `torque_vector` | `[number, number, number]` | N·m | OPTIONAL | — | `[0.01, 0.0, -0.02]` |
-| 7 | `slip_event` | boolean | — | REQUIRED (unconditional) | L1+ | `false` |
+| 7 | `slip_event` | boolean \| null | — | REQUIRED key; value MAY be `null` | L1+ | `false` |
 | 8 | `slip_velocity` | `[number, number]` | mm/s | OPTIONAL (semantically implied when `slip_event == true`) | — | `[12.5, -3.0]` |
 | 9 | `manipulation_phase` | string enum | — | OPTIONAL | — | `"hold"` |
 | 10 | `texture_class` | string enum | — | OPTIONAL | — | `"smooth"` |
@@ -212,17 +212,29 @@ The 14 dimensions, in normative order, are:
 
 ### 4.1 `contact`
 
-- **Type:** boolean
+- **Type:** boolean or `null` (**tri-state**)
 - **Unit:** dimensionless
-- **Requiredness:** REQUIRED, unconditionally
+- **Requiredness:** the key is REQUIRED unconditionally; the value MAY be `null`
 - **Level gate:** part of L1 and above
 - **Example:** `true`
 
-> **[S-4.1-1]** `contact` MUST be a JSON boolean (not `0`/`1`, not a string).
+> **[S-4.1-1]** `contact` MUST be a JSON boolean or `null` (not `0`/`1`, not a
+> string, not a missing key).
 > **[S-4.1-2]** `contact` MUST be `true` if and only if any detectable contact
-> between the sensor surface and an object is present in that frame.
+> between the sensor surface and an object is present in that frame; it MUST be
+> `false` if and only if the producer has positively determined that no contact
+> is present.
 > **[S-4.1-3]** A conformant validator MUST reject a record whose `contact` is
-> not a boolean.
+> neither a boolean nor `null`.
+> **[S-4.1-4]** `contact` MUST be `null` if and only if the producer cannot
+> determine contact for that frame — for example when the dataset carries no
+> contact judgement at all, or when the frame is unusable. A producer MUST NOT
+> emit `false` to mean "not measured": `false` asserts the absence of contact,
+> which is a stronger claim than having no data.
+> **[S-4.1-5]** "REQUIRED (unconditional)" in this specification always refers to
+> the **presence of the key**, never to a non-null value. Consumers MUST
+> distinguish a missing key (non-conformant) from an explicit `null`
+> (conformant, means "unknown").
 
 ### 4.2 `contact_centroid`
 
@@ -297,17 +309,22 @@ The 14 dimensions, in normative order, are:
 
 ### 4.7 `slip_event`
 
-- **Type:** boolean
+- **Type:** boolean or `null` (**tri-state**)
 - **Unit:** dimensionless
-- **Requiredness:** REQUIRED, unconditionally
+- **Requiredness:** the key is REQUIRED unconditionally; the value MAY be `null`
 - **Level gate:** part of L1 and above
 - **Example:** `false`
 
-> **[S-4.7-1]** `slip_event` MUST be a JSON boolean.
+> **[S-4.7-1]** `slip_event` MUST be a JSON boolean or `null`.
 > **[S-4.7-2]** `slip_event` MUST be `true` if and only if detectable relative
 > motion between the sensor surface and the contact object is present.
 > **[S-4.7-3]** A conformant validator MUST reject a record whose `slip_event`
-> is not a boolean.
+> is neither a boolean nor `null`.
+> **[S-4.7-4]** `slip_event` MUST be `null` if and only if the producer cannot
+> determine slip for that frame. A producer MUST NOT emit `false` to mean
+> "not measured". Note that slip is never directly observable: even a `true` or
+> `false` judgement is an inference and should be accompanied by the method used
+> in a V3.0 dataset.
 
 ### 4.8 `slip_velocity`
 
@@ -421,15 +438,26 @@ The 14 dimensions, in normative order, are:
 | **L3** | Full-Vector | Complete 3-D force vector available | L2 + `force_vector` |
 | **L4** | Rich-Semantic | Full semantics; all optional dimensions populated | L3 + `contact_region`, `torque_vector`, `slip_velocity`, `manipulation_phase`, `texture_class`, `object_deformation`, `temperature` |
 
+> **[S-5.1-1]** A level describes which judgements a producer is **capable of
+> expressing**, not how many frames happen to carry a non-null value. A
+> conformant L1 record MAY therefore have `contact = null` and
+> `slip_event = null` on some or all frames: the producer is still declaring
+> that it *can* emit the contact-level judgement, and the `null` says this
+> particular frame did not yield one. Encoding "not measured" as `false`
+> instead is non-conformant ([S-4.1-4](#41-contact), [S-4.7-4](#47-slip_event)).
+
 ### 5.2 Normative determination rules
 
 The following clauses are written to be directly translatable into conformance
 tests. Let `r` be a Schema V2 record and `L(r)` its `compliance_level`.
 
 > **[S-5.2-1] (L1 base)** Every conformant record MUST satisfy:
-> `r.contact` is boolean, `r.slip_event` is boolean,
+> `r.contact` is boolean or `null`, `r.slip_event` is boolean or `null`,
 > `r.confidence ∈ [0,1]`, and `r.compliance_level ∈ {L1,L2,L3,L4}`.
 > If `r.contact == true` then `r.contact_centroid` is a 2-element numeric array.
+> A `null` value in `contact` or `slip_event` does **not** by itself lower the
+> compliance level: L1 requires that the judgement be *expressible*, not that it
+> be *available* for every frame.
 >
 > **[S-5.2-2] (L2 gate)** If `L(r) ∈ {L2, L3, L4}` then `r.force_magnitude` is
 > a non-null number.
@@ -547,7 +575,18 @@ full L4 conformance MUST enforce [S-5.2-4] themselves.
 > **[S-6.4-1]** An unsupported dimension MUST be `null`. It MUST NOT be filled
 > with `0` or any other numeric placeholder.
 > **[S-6.4-2]** The rationale is that `0` is a meaningful measurement (zero
-> force), whereas `null` means "this sensor does not provide this dimension".
+> force), whereas `null` means "no value here". There are two distinct reasons
+> a value may be `null`, and a consumer MUST NOT conflate them:
+>
+> - **structurally unsupported** — `capabilities[f] == false`; the producer can
+>   never emit this dimension. This is a property of the sensor.
+> - **per-frame unavailable** — `capabilities[f] == true` but this particular
+>   frame yielded no judgement (signal too weak, frame unusable, producer had no
+>   basis to decide). This is a property of the frame.
+>
+> **[S-6.4-3]** For the tri-state dimensions `contact` and `slip_event`, the
+> second case is expressed as `null` and MUST NOT be expressed as `false`
+> ([S-4.1-4](#41-contact), [S-4.7-4](#47-slip_event)).
 
 ### 6.5 Compliance level assignment
 
@@ -682,11 +721,12 @@ A test suite can implement the following checks directly against
 | ID | Check | Clause |
 |---|---|---|
 | C-01 | Record contains all 14 keys in normative order | S-4.0-1 |
-| C-02 | `contact` is boolean | S-4.1-1, S-5.2-1 |
-| C-03 | `slip_event` is boolean | S-4.7-1, S-5.2-1 |
+| C-02 | `contact` is boolean or `null` (key present) | S-4.1-1, S-4.1-5, S-5.2-1 |
+| C-03 | `slip_event` is boolean or `null` (key present) | S-4.7-1, S-5.2-1 |
+| C-03a | `contact` is `null` only when the frame carries no judgement — a producer MUST NOT use `false` for "not measured" | S-4.1-4, S-4.7-4 |
 | C-04 | `confidence ∈ [0.0, 1.0]` | S-4.13-1 |
 | C-05 | `compliance_level ∈ {L1,L2,L3,L4}` | S-4.14-1 |
-| C-06 | `contact == true` ⇒ `contact_centroid` is 2 numbers | S-4.2-1 |
+| C-06 | `contact == true` ⇒ `contact_centroid` is 2 numbers; `contact == null` ⇒ no centroid requirement | S-4.2-1 |
 | C-07 | level ≥ L2 ⇒ `force_magnitude` non-null | S-5.2-2 |
 | C-08 | level ≥ L3 ⇒ `force_vector` is 3 numbers | S-5.2-3 |
 | C-09 | level == L4 ⇒ all optional dimensions non-null | S-5.2-4 |

@@ -81,7 +81,8 @@ class DaimonDmTacAdapter(SensorAdapterBase):
             "slip_velocity": True,  # 由 shear 通道换算
             "manipulation_phase": False,  # load 写死 "idle" 哨兵，不做阶段推断
             "texture_class": False,
-            "object_deformation": True,  # 种类正确（形变），单位待 V3.0 规范
+            # v0.26（V3.0 对齐）：形变灰度值不是毫米，不再声明形变能力。
+            "object_deformation": False,
             "temperature": False,
             "confidence": True,
         }
@@ -213,7 +214,10 @@ class DaimonDmTacAdapter(SensorAdapterBase):
             slip_velocity=slip_velocity,
             manipulation_phase=None,
             texture_class=None,
-            object_deformation=round(deformation_mag, 4) if contact else None,
+            # v0.26（V3.0 对齐）：形变灰度图的量值是无量纲（灰度×100），
+            # 而 object_deformation 单位是 mm。原值见 raw_sensor_values 与
+            # 帧级 sensor_specific.deformation_image_rms。
+            object_deformation=None,
             temperature=None,
             confidence=confidence,
             # P9/T0-10：原为 L2 —— 靠形变×100 的 force_magnitude 勉强满足 L2
@@ -384,19 +388,30 @@ class DaimonDmTacAdapter(SensorAdapterBase):
                 "contact_transition": round(contact_trans, 4),
             }
 
+            schema_v2 = self.extract_schema(frame)
+            _ss = {
+                "device_id": self._device_id,
+                "frame_shape": list(frame.shape),
+                "source": "dm_tac_realtime",
+            }
+            # v0.26（V3.0 对齐）：无量纲形变量搬进 sensor_specific，带单位与方法标识。
+            _rms = (schema_v2.raw_sensor_values or {}).get("deformation_magnitude")
+            if _rms is not None:
+                _ss["deformation_image_rms"] = {
+                    "value": _rms, "unit": "1",
+                    "method_id": "daimon_dm_tac:deform_gray_scale_v2",
+                    "namespace": "image_intensity",
+                }
+
             frame_data = TLabelFrame(
                 frame_idx=frame_idx,
                 timestamp_s=round(frame_idx * dt, 4),
                 # 走 extract_schema：它会用 shear 场合成 force_vector，
                 # 裸 from_tlabel_v1 会把这个增强丢掉。
-                schema_v2=self.extract_schema(frame),
+                schema_v2=schema_v2,
                 manipulation_phase="idle",
                 confidence=0.8 if contact > 0.5 else 0.95,
-                sensor_specific={
-                    "device_id": self._device_id,
-                    "frame_shape": list(frame.shape),
-                    "source": "dm_tac_realtime",
-                },
+                sensor_specific=_ss,
             )
             yield frame_data
 
@@ -518,18 +533,29 @@ class DaimonDmTacAdapter(SensorAdapterBase):
                     "contact_transition": round(contact_trans, 4),
                 }
 
+                schema_v2 = self.extract_schema(frame)
+                _ss = {
+                    "source": str(device_source),
+                    "frame_shape": list(frame.shape),
+                }
+                # v0.26（V3.0 对齐）：无量纲形变量搬进 sensor_specific。
+                _rms = (schema_v2.raw_sensor_values or {}).get("deformation_magnitude")
+                if _rms is not None:
+                    _ss["deformation_image_rms"] = {
+                        "value": _rms, "unit": "1",
+                        "method_id": "daimon_dm_tac:deform_gray_scale_v2",
+                        "namespace": "image_intensity",
+                    }
+
                 frame_data = TLabelFrame(
                     frame_idx=fi,
                     timestamp_s=round(fi / sample_rate, 4),
                     # 走 extract_schema：它会用 shear 场合成 force_vector，
                 # 裸 from_tlabel_v1 会把这个增强丢掉。
-                schema_v2=self.extract_schema(frame),
+                schema_v2=schema_v2,
                     manipulation_phase="idle",
                     confidence=0.8 if contact > 0.5 else 0.95,
-                    sensor_specific={
-                        "source": str(device_source),
-                        "frame_shape": list(frame.shape),
-                    },
+                    sensor_specific=_ss,
                 )
                 frames.append(frame_data)
                 prev_tlabel_v2 = tlabel_v2

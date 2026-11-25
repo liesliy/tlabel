@@ -816,11 +816,12 @@ class ToucHDAdapter(BaseAdapter):
             )
 
         # 统一推断阶段
+        # v0.26（D8）：三态字段，`None > 0.5` 会抛 TypeError，且未知不能当作「没有」。
         frames_info = []
         for f in all_tlabel_frames:
             frames_info.append({
-                "is_contact": f.contact > 0.5,
-                "is_slip": f.slip_event > 0.5,
+                "is_contact": f.contact is True,
+                "is_slip": f.slip_event is True,
             })
         phases = _infer_phases(frames_info)
         for f, phase in zip(all_tlabel_frames, phases):
@@ -829,11 +830,11 @@ class ToucHDAdapter(BaseAdapter):
         # 统计
         contact_count = sum(
             1 for f in all_tlabel_frames
-            if f.contact > 0.5
+            if f.contact is True
         )
         slip_count = sum(
             1 for f in all_tlabel_frames
-            if f.slip_event > 0.5
+            if f.slip_event is True
         )
 
         sensor_info = {

@@ -103,12 +103,20 @@ class QualityScorer:
 
         for frame in data.frames:
             sv2 = frame.schema_v2
+            # v0.26（D8）：contact 是三态，而下面 5 条规则全部以 contact 为前提。
+            # 未知帧直接跳过 —— 以前 `1.0 if contact else 0.0` 把 None 压成 0.0，
+            # Rule 1/2 于是对着「确定没接触」这个假前提判违规，把「不知道」
+            # 报成「数据自相矛盾」。
+            if sv2.contact is None:
+                continue
             contact = 1.0 if sv2.contact else 0.0
             # P9：这里把缺失填成 0.0 是**安全的**，因为下面所有规则都是
             # "值 > 阈值才算违规"。缺失（无数据）不构成违规证据，填 0.0
             # 等价于"不参与判定"，不会误报也不会漏报。
             force = sv2.force_magnitude if sv2.force_magnitude is not None else 0.0
-            slip = 1.0 if sv2.slip_event else 0.0
+            # slip 同样三态：未知时既不能说「滑了」也不能说「没滑」，
+            # 因此 Rule 2/3 在 slip 未知时不参与判定。
+            slip = None if sv2.slip_event is None else (1.0 if sv2.slip_event else 0.0)
             deformation = sv2.object_deformation if sv2.object_deformation is not None else 0.0
 
             # Rule 1: contact=0 → force should be ~0
@@ -122,13 +130,13 @@ class QualityScorer:
             # Rule 2: contact=0 → slip should be 0
             if contact < 0.1:
                 total_checks += 1
-                if slip > 0.5:
+                if slip is not None and slip > 0.5:
                     violations += 1
                     if self.verbose:
                         warnings.append(f"Frame {frame.frame_idx}: contact={contact:.2f} but slip_event={slip:.2f}")
 
             # Rule 3: slip>0 → contact should be >0
-            if slip > 0.5:
+            if slip is not None and slip > 0.5:
                 total_checks += 1
                 if contact < 0.1:
                     violations += 1
@@ -216,15 +224,17 @@ class QualityScorer:
             sv2 = frame.schema_v2
             contact_related = [
                 sv2.force_magnitude if sv2.force_magnitude is not None else 0.0,
-                1.0 if sv2.slip_event else 0.0,
+                1.0 if sv2.slip_event else 0.0,   # 三态；未知按「无滑移信号」计，仅用于全零判定
                 sv2.object_deformation if sv2.object_deformation is not None else 0.0,
             ]
-            if not sv2.contact:
+            # v0.26（D8）：只有明确「非接触」才做全零判定。
+            # None 是「不知道有没有接触」，不构成全零证据。
+            if sv2.contact is False:
                 if all(v == 0 for v in contact_related):
                     all_zero_count += 1
 
         # Check if contact frames have meaningful data
-        contact_frames = [f for f in data.frames if f.contact > 0.5]
+        contact_frames = [f for f in data.frames if f.contact is True]
         empty_contact = 0
         for f in contact_frames:
             sv2 = f.schema_v2
@@ -252,7 +262,11 @@ class QualityScorer:
         if total == 0:
             return 0.0, ["无帧数据"]
 
-        contact_count = sum(1 for f in data.frames if f.contact > 0.5)
+        # v0.26（D8）：contact / slip_event 是三态，`None > 0.5` 会抛 TypeError。
+        # 口径：只有明确的 True 才算接触/滑移帧；None 计入分母（数据不完整要扣分），
+        # 但单独统计并给出提示——不能悄悄当成「非接触」。
+        contact_count = sum(1 for f in data.frames if f.contact is True)
+        contact_unknown = sum(1 for f in data.frames if f.contact is None)
         contact_ratio = contact_count / total
 
         high_conf = sum(1 for f in data.frames if f.confidence > 0.5)
@@ -261,15 +275,25 @@ class QualityScorer:
         phases = set(f.manipulation_phase for f in data.frames)
         phase_diversity = min(len(phases) / 5, 1.0)
 
-        slip_count = sum(1 for f in data.frames if f.slip_event > 0.5)
+        slip_count = sum(1 for f in data.frames if f.slip_event is True)
+        slip_unknown = sum(1 for f in data.frames if f.slip_event is None)
         has_slip = 1.0 if slip_count > 0 else (0.5 if total < 50 else 0.0)
 
         if contact_ratio < 0.05:
             warnings.append("接触帧占比极低 ({:.1%})，数据可能无实际交互".format(contact_ratio))
+        if contact_unknown:
+            warnings.append(
+                "{} 帧接触状态未知（contact=null），这些帧无法判断是否发生交互".format(contact_unknown)
+            )
         if conf_ratio < 0.8:
             warnings.append("高置信度帧占比低 ({:.1%})".format(conf_ratio))
         if not has_slip and total >= 50:
-            warnings.append("无滑移事件标注，建议补充slip_event")
+            if slip_unknown == total:
+                warnings.append(
+                    "全部 {} 帧滑移状态未知（slip_event=null）：该数据集无滑移判据".format(total)
+                )
+            else:
+                warnings.append("无滑移事件标注，建议补充slip_event")
 
         coverage = (
             min(contact_ratio * 5, 1.0) * 0.3 +
