@@ -125,6 +125,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `bool("")` 得到 `False`——同一个坑换了个入口。`_tristate()` 加字符串分支：
   空串还原 `None`，`"0"` / `"0.0"` / `"false"` 得 `False`（`bool("0") == True`
   是反向错误），无法解释的字面量抛 `ValueError`。
+- `tashan_ts_f_a` 的无效标记分支把 uint16 无效值（65535）当成"确定无接触"：
+  返回 `contact=False` + `force_magnitude=0.0`。违反 TL-5.1-3（*MUST NOT emit
+  `false` to mean "not measured"*），且 0.0 会进入下游均值方差。改为
+  `contact=None` / `force_magnitude=None`；`raw_sensor_values` 里的原始读数
+  此前也被抹成 0.0，改为保留真实值。
+- `paxini_px6d` 占位符适配器每帧返回 `contact=False` / `slip_event=False` /
+  `confidence=0.0`：未实现被表达成"确定没有"。改为全部 `None`，
+  `compliance_level` 仍由基类兜底为 `L1`。同类问题全仓库只剩这两处，已加
+  `tests/unit/test_adapter_invalid_tristate.py` 锁住。
 
 ## [0.25.0] - 2026-11-12
 

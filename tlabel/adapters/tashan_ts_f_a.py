@@ -136,15 +136,19 @@ class TashanTsFAAdapter(DataAdapterBase):
         fy = raw_frame_data.get("tangential_fy", 0.0)
 
         # 无效值处理
+        # 65535 是 uint16 无效标记：这一帧测量值无效，不是「确定无接触」。
+        # contact 必须 None（TL-5.1-3：MUST NOT emit false to mean "not measured"）；
+        # force_magnitude 必须 None —— 无效数据不是零力，填 0.0 会让下游把它
+        # 计入均值方差，静默污染统计。原始读数保留在 raw_sensor_values 里。
         if nf == INVALID_MARKER or tf == INVALID_MARKER:
             return TLabelSchemaV2(
-                contact=False,
-                force_magnitude=0.0,
+                contact=None,
+                force_magnitude=None,
                 force_vector=None,
                 compliance_level="L1",
                 raw_sensor_values={
-                    "raw_normal_force": 0.0,
-                    "raw_tangential_force": 0.0,
+                    "raw_normal_force": float(nf),
+                    "raw_tangential_force": float(tf),
                     "invalid": True,
                     "invalid_marker_value": INVALID_MARKER,
                 },

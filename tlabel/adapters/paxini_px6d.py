@@ -74,11 +74,17 @@ class PaxiniPX6DAdapter(SensorAdapterBase):
         }
 
     def extract_schema(self, raw_frame_data) -> TLabelSchemaV2:
-        """占位实现：返回空 Schema（compliance_level=L1）"""
+        """占位实现：返回空 Schema（compliance_level=L1）
+
+        三态字段必须是 None —— 本 adapter 尚未实现，不产出任何测量值。
+        填 False 等于宣称「确定没有接触」，违反 TL-5.1-3：
+        *"A producer MUST NOT emit `false` to mean 'not measured'."*
+        confidence 同理，0.0 会被下游当成「测到了零信心」，填 None。
+        """
         return TLabelSchemaV2(
-            contact=False,
-            slip_event=False,
-            confidence=0.0,
+            contact=None,
+            slip_event=None,
+            confidence=None,
             compliance_level="L1",
         )
 
